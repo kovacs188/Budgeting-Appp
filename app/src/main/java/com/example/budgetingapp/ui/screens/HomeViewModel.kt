@@ -6,13 +6,11 @@ import com.example.budgetingapp.data.model.Category
 import com.example.budgetingapp.data.model.CategoryType
 import com.example.budgetingapp.data.model.Transaction
 import com.example.budgetingapp.data.model.TransactionFormState
-import com.example.budgetingapp.data.preferences.UserPreferences
 import com.example.budgetingapp.data.repository.BudgetRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import javax.inject.Inject
@@ -44,20 +42,13 @@ data class HomeUiState(
     val selectedCategory: Category? = null,
     val categorySummaries: List<CategorySummary> = emptyList(),
     val monthlyData: List<MonthlyData> = emptyList(),
-    val categoryCardOrder: List<CategoryType> = listOf(
-        CategoryType.INCOME,
-        CategoryType.FIXED_EXPENSE,
-        CategoryType.VARIABLE_EXPENSE,
-        CategoryType.DISCRETIONARY_EXPENSE
-    ),
     val transactionSubmitted: Boolean = false,
     val errorMessage: String? = null
 )
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val repository: BudgetRepository,
-    private val userPreferences: UserPreferences
+    private val repository: BudgetRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -72,46 +63,22 @@ class HomeViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(isLoading = true)
 
             try {
-                // Combine current month data, card order preferences, and historical data
-                combine(
-                    repository.currentMonthFlow,
-                    userPreferences.categoryCardOrder
-                ) { currentMonth, cardOrder ->
-                    Pair(currentMonth, cardOrder)
-                }.collect { (currentMonth, cardOrderStrings) ->
+                // Load current month category summaries
+                val categorySummaries = loadCategorySummaries()
 
-                    // Load current month category summaries
-                    val categorySummaries = loadCategorySummaries()
+                // Load 12-month historical data
+                val monthlyData = loadMonthlyData()
 
-                    // Load 12-month historical data
-                    val monthlyData = loadMonthlyData()
+                // Load discretionary categories by default for quick entry
+                val discretionaryCategories = repository.getCategoriesForCurrentMonthByType(CategoryType.DISCRETIONARY_EXPENSE)
 
-                    // Convert card order strings to CategoryType enum
-                    val categoryOrder = cardOrderStrings.mapNotNull { orderString ->
-                        try {
-                            CategoryType.valueOf(orderString)
-                        } catch (e: IllegalArgumentException) {
-                            null
-                        }
-                    }.takeIf { it.isNotEmpty() } ?: listOf(
-                        CategoryType.INCOME,
-                        CategoryType.FIXED_EXPENSE,
-                        CategoryType.VARIABLE_EXPENSE,
-                        CategoryType.DISCRETIONARY_EXPENSE
-                    )
-
-                    // Load discretionary categories by default for quick entry
-                    val discretionaryCategories = repository.getCategoriesForCurrentMonthByType(CategoryType.DISCRETIONARY_EXPENSE)
-
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        categorySummaries = categorySummaries,
-                        monthlyData = monthlyData,
-                        categoryCardOrder = categoryOrder,
-                        availableCategories = discretionaryCategories,
-                        selectedCategory = discretionaryCategories.firstOrNull()
-                    )
-                }
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    categorySummaries = categorySummaries,
+                    monthlyData = monthlyData,
+                    availableCategories = discretionaryCategories,
+                    selectedCategory = discretionaryCategories.firstOrNull()
+                )
 
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
@@ -135,20 +102,25 @@ class HomeViewModel @Inject constructor(
     }
 
     private suspend fun loadMonthlyData(): List<MonthlyData> {
-        val allMonths = repository.getAllMonths().take(12)
+        return try {
+            val allMonths = repository.getAllMonths().take(12)
 
-        return allMonths.map { month ->
-            val monthCategories = repository.getCategoriesForMonth(month.id)
-            val income = monthCategories.filter { it.type == CategoryType.INCOME }.sumOf { it.actualAmount }
-            val expenses = monthCategories.filter { it.type != CategoryType.INCOME }.sumOf { it.actualAmount }
+            allMonths.map { month ->
+                val monthCategories = repository.getCategoriesForMonth(month.id)
+                val income = monthCategories.filter { it.type == CategoryType.INCOME }.sumOf { it.actualAmount }
+                val expenses = monthCategories.filter { it.type != CategoryType.INCOME }.sumOf { it.actualAmount }
 
-            MonthlyData(
-                monthName = "${month.name} ${month.year}",
-                income = income,
-                expenses = expenses,
-                savings = income - expenses
-            )
-        }.reversed() // Show oldest to newest
+                MonthlyData(
+                    monthName = "${month.name} ${month.year}",
+                    income = income,
+                    expenses = expenses,
+                    savings = income - expenses
+                )
+            }.reversed() // Show oldest to newest
+        } catch (e: Exception) {
+            // Return empty list if there's an error loading monthly data
+            emptyList()
+        }
     }
 
     fun toggleQuickEntry() {
@@ -231,14 +203,6 @@ class HomeViewModel @Inject constructor(
                     errorMessage = "Failed to add transaction: ${e.message}"
                 )
             }
-        }
-    }
-
-    fun reorderCategoryCards(newOrder: List<CategoryType>) {
-        viewModelScope.launch {
-            val orderStrings = newOrder.map { it.name }
-            userPreferences.saveCategoryCardOrder(orderStrings)
-            _uiState.value = _uiState.value.copy(categoryCardOrder = newOrder)
         }
     }
 

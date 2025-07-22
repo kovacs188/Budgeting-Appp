@@ -76,6 +76,11 @@ fun BudgetNavGraph(
                 categoryId = categoryId,
                 onNavigateBack = {
                     navController.popBackStack()
+                },
+                onNavigateToEditCategory = { categoryId ->
+                    // For now, just navigate to the category creator
+                    // We'll pass the category through the viewModel
+                    navController.navigate(Screen.CategoryCreator.route)
                 }
             )
         }

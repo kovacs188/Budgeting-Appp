@@ -6,6 +6,7 @@ import com.example.budgetingapp.data.database.BudgetDatabase
 import com.example.budgetingapp.data.database.CategoryDao
 import com.example.budgetingapp.data.database.MonthDao
 import com.example.budgetingapp.data.database.TransactionDao
+import com.example.budgetingapp.data.repository.BudgetRepository
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -40,5 +41,16 @@ object DatabaseModule {
     @Provides
     fun provideTransactionDao(database: BudgetDatabase): TransactionDao {
         return database.transactionDao()
+    }
+
+    // Only provide BudgetRepository - it uses all the DAOs internally
+    @Provides
+    @Singleton
+    fun provideBudgetRepository(
+        monthDao: MonthDao,
+        categoryDao: CategoryDao,
+        transactionDao: TransactionDao
+    ): BudgetRepository {
+        return BudgetRepository(monthDao, categoryDao, transactionDao)
     }
 }

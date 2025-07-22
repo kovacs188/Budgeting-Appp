@@ -18,7 +18,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.time.LocalDate
-import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -57,10 +56,6 @@ class BudgetRepository @Inject constructor(
         } else {
             val currentMonth = Month.createCurrentMonth()
             monthDao.insertMonth(currentMonth)
-
-            // NEW: Auto-copy categories from most recent month
-            copyPreviousMonthCategories(currentMonth.id)
-
             _currentMonthFlow.value = currentMonth
         }
     }
@@ -79,64 +74,8 @@ class BudgetRepository @Inject constructor(
                 month = monthValue
             )
             monthDao.insertMonth(newMonth)
-
-            // NEW: Auto-copy categories from most recent month
-            copyPreviousMonthCategories(newMonth.id)
-
             _currentMonthFlow.value = newMonth
             newMonth
-        }
-    }
-
-    // NEW METHOD: Copy categories from the most recent month
-    private suspend fun copyPreviousMonthCategories(newMonthId: String) {
-        try {
-            // Get all months ordered by most recent first
-            val allMonths = monthDao.getAllActiveMonths().first()
-
-            // Find the most recent month (excluding the one we just created)
-            val previousMonth = allMonths.firstOrNull { it.id != newMonthId }
-
-            if (previousMonth != null) {
-                // Get categories from the previous month
-                val previousCategories = categoryDao.getCategoriesForMonth(previousMonth.id).first()
-
-                // Copy each category to the new month with smart spending logic
-                previousCategories.forEach { category ->
-                    val newActualAmount = when (category.type) {
-                        CategoryType.FIXED_EXPENSE -> {
-                            // Fixed expenses: carry over spending (rent, insurance, etc.)
-                            category.actualAmount
-                        }
-                        CategoryType.INCOME,
-                        CategoryType.VARIABLE_EXPENSE,
-                        CategoryType.DISCRETIONARY_EXPENSE -> {
-                            // All others: reset to $0 for fresh tracking
-                            0.0
-                        }
-                    }
-
-                    val newCategory = category.copy(
-                        id = "category_${System.currentTimeMillis()}_${kotlin.random.Random.nextInt(1000)}",
-                        monthId = newMonthId,
-                        actualAmount = newActualAmount,
-                        createdDate = LocalDateTime.now()
-                    )
-                    categoryDao.insertCategory(newCategory)
-                }
-
-                // Log for debugging (remove in production)
-                val fixedExpenseCount = previousCategories.count { it.type == CategoryType.FIXED_EXPENSE }
-                println("✅ Auto-copied ${previousCategories.size} categories from ${previousMonth.displayName}")
-                println("   → Fixed expenses ($fixedExpenseCount): spending carried over")
-                println("   → Other categories: spending reset to $0")
-            } else {
-                println("ℹ️ No previous month found - user will create categories manually")
-            }
-
-        } catch (e: Exception) {
-            // Don't crash if auto-copy fails - user can still create categories manually
-            println("⚠️ Auto-copy categories failed: ${e.message}")
         }
     }
 
@@ -213,6 +152,24 @@ class BudgetRepository @Inject constructor(
         }
     }
 
+    suspend fun updateCategory(category: Category): Result<Category> {
+        return try {
+            categoryDao.updateCategory(category)
+            Result.success(category)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteCategory(categoryId: String): Result<Unit> {
+        return try {
+            categoryDao.deleteCategory(categoryId)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun getAllCategories(): List<Category> {
         return categoryDao.getAllActiveCategories().first()
     }
@@ -270,6 +227,15 @@ class BudgetRepository @Inject constructor(
         }
     }
 
+    suspend fun deleteTransaction(transactionId: String): Result<Unit> {
+        return try {
+            transactionDao.deleteTransaction(transactionId)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun getTransactionById(transactionId: String): Transaction? {
         return transactionDao.getTransactionById(transactionId)
     }
@@ -305,23 +271,12 @@ class BudgetRepository @Inject constructor(
         }
     }
 
-    suspend fun deleteTransaction(transactionId: String): Result<Unit> {
-        return try {
-            transactionDao.deleteTransaction(transactionId)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
     // Budget calculations with real transaction data
     suspend fun getTotalIncome(): Double {
-        val currentMonthId = getCurrentMonth()?.id ?: return 0.0
         return getCategoriesForCurrentMonthByType(CategoryType.INCOME).sumOf { it.targetAmount }
     }
 
     suspend fun getTotalExpenses(): Double {
-        val currentMonthId = getCurrentMonth()?.id ?: return 0.0
         val categories = getCategoriesForCurrentMonth()
         return categories.filter { it.type != CategoryType.INCOME }.sumOf { it.targetAmount }
     }
@@ -366,25 +321,5 @@ class BudgetRepository @Inject constructor(
             transactionCount = categoryTransactions.size,
             lastTransactionDate = categoryTransactions.maxByOrNull { it.date }?.date
         )
-    }
-
-    // Update category (for future direct editing)
-    suspend fun updateCategory(category: Category): Result<Category> {
-        return try {
-            categoryDao.updateCategory(category)
-            Result.success(category)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    // Delete category
-    suspend fun deleteCategory(categoryId: String): Result<Unit> {
-        return try {
-            categoryDao.deleteCategory(categoryId)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
     }
 }

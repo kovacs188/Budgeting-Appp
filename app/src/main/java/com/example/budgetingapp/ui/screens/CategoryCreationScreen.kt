@@ -1,14 +1,40 @@
 package com.example.budgetingapp.ui.screens
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -16,6 +42,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.budgetingapp.data.model.Category
 import com.example.budgetingapp.data.model.CategoryType
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -23,17 +50,37 @@ import com.example.budgetingapp.data.model.CategoryType
 fun CategoryCreationScreen(
     onNavigateBack: () -> Unit,
     onCategoryCreated: () -> Unit,
+    existingCategory: Category? = null,
     viewModel: CategoryViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val formState = uiState.formState
+    val isEditMode = existingCategory != null
+
+    // Initialize the form
+    LaunchedEffect(existingCategory) {
+        if (existingCategory != null) {
+            viewModel.initializeForEdit(existingCategory)
+        } else {
+            viewModel.initializeForCreate()
+        }
+    }
+
+    // Handle success
+    LaunchedEffect(uiState.categoryCreated, uiState.categoryUpdated) {
+        if (uiState.categoryCreated || uiState.categoryUpdated) {
+            onCategoryCreated()
+            viewModel.markCategoryCreatedHandled()
+            viewModel.markCategoryUpdatedHandled()
+        }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        text = "Create Category",
+                        text = if (isEditMode) "Edit Category" else "Create Category",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -48,18 +95,20 @@ fun CategoryCreationScreen(
                 },
                 actions = {
                     IconButton(
-                        onClick = {
-                            viewModel.createCategory()
-                            if (formState.isValid) {
-                                onCategoryCreated()
-                            }
-                        },
-                        enabled = formState.isValid
+                        onClick = { viewModel.saveCategory() },
+                        enabled = formState.isValid && !uiState.isLoading
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "Save Category"
-                        )
+                        if (uiState.isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Save Category"
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -79,6 +128,22 @@ fun CategoryCreationScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // Error message
+            uiState.errorMessage?.let { errorMessage ->
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Text(
+                        text = errorMessage,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+            }
+
             // Category Name Input
             OutlinedTextField(
                 value = formState.name,
@@ -162,13 +227,8 @@ fun CategoryCreationScreen(
 
             // Save Button
             Button(
-                onClick = {
-                    viewModel.createCategory()
-                    if (formState.isValid) {
-                        onCategoryCreated()
-                    }
-                },
-                enabled = formState.isValid,
+                onClick = { viewModel.saveCategory() },
+                enabled = formState.isValid && !uiState.isLoading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
@@ -176,11 +236,18 @@ fun CategoryCreationScreen(
                     containerColor = MaterialTheme.colorScheme.primary
                 )
             ) {
-                Text(
-                    text = "Create Category",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium
-                )
+                if (uiState.isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Text(
+                        text = if (isEditMode) "Update Category" else "Create Category",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
 
             // Help Text

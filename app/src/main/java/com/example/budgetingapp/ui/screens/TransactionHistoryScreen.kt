@@ -52,13 +52,13 @@ import com.example.budgetingapp.data.model.Transaction
 fun TransactionHistoryScreen(
     categoryId: String,
     onNavigateBack: () -> Unit,
+    onNavigateToEditCategory: (String) -> Unit,
     viewModel: TransactionHistoryViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var selectedTransactionToDelete by remember { mutableStateOf<Transaction?>(null) }
     var selectedTransactionToEdit by remember { mutableStateOf<Transaction?>(null) }
     var showAddTransactionDialog by remember { mutableStateOf(false) }
-    var showEditCategoryDialog by remember { mutableStateOf(false) }
     var showDeleteCategoryDialog by remember { mutableStateOf(false) }
 
     // Load transactions when screen opens
@@ -193,7 +193,7 @@ fun TransactionHistoryScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             OutlinedButton(
-                                onClick = { showEditCategoryDialog = true },
+                                onClick = { onNavigateToEditCategory(category.id) },
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Text("Edit Category")
@@ -256,20 +256,6 @@ fun TransactionHistoryScreen(
                     }
                 }
             }
-        }
-    }
-
-    // Edit Category Dialog
-    if (showEditCategoryDialog) {
-        uiState.category?.let { category ->
-            CategoryEditDialog(
-                category = category,
-                onDismiss = { showEditCategoryDialog = false },
-                onCategoryUpdated = {
-                    showEditCategoryDialog = false
-                    viewModel.refreshTransactions()
-                }
-            )
         }
     }
 

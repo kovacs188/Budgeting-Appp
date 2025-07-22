@@ -15,9 +15,12 @@ import javax.inject.Inject
 
 data class CategoryUiState(
     val formState: CategoryFormState = CategoryFormState(),
+    val originalCategory: Category? = null,
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
-    val categoryCreated: Boolean = false
+    val categoryCreated: Boolean = false,
+    val categoryUpdated: Boolean = false,
+    val isEditMode: Boolean = false
 )
 
 @HiltViewModel
@@ -30,6 +33,31 @@ class CategoryViewModel @Inject constructor(
 
     // Expose repository's categories flow
     val categoriesFlow = repository.categoriesFlow
+
+    // Initialize for editing an existing category
+    fun initializeForEdit(category: Category) {
+        val formState = CategoryFormState(
+            name = category.name,
+            type = category.type,
+            targetAmount = category.targetAmount.toString(),
+            description = category.description
+        ).validate()
+
+        _uiState.value = _uiState.value.copy(
+            formState = formState,
+            originalCategory = category,
+            isEditMode = true
+        )
+    }
+
+    // Initialize for creating a new category
+    fun initializeForCreate() {
+        _uiState.value = _uiState.value.copy(
+            formState = CategoryFormState(),
+            originalCategory = null,
+            isEditMode = false
+        )
+    }
 
     fun updateName(name: String) {
         val currentForm = _uiState.value.formState
@@ -55,7 +83,15 @@ class CategoryViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(formState = updatedForm)
     }
 
-    fun createCategory() {
+    fun saveCategory() {
+        if (_uiState.value.isEditMode) {
+            updateCategory()
+        } else {
+            createCategory()
+        }
+    }
+
+    private fun createCategory() {
         val formState = _uiState.value.formState.validate()
         _uiState.value = _uiState.value.copy(formState = formState)
 
@@ -99,6 +135,56 @@ class CategoryViewModel @Inject constructor(
         }
     }
 
+    private fun updateCategory() {
+        val formState = _uiState.value.formState.validate()
+        _uiState.value = _uiState.value.copy(formState = formState)
+
+        if (!formState.isValid) {
+            return
+        }
+
+        val originalCategory = _uiState.value.originalCategory
+        if (originalCategory == null) {
+            _uiState.value = _uiState.value.copy(
+                errorMessage = "Original category not found"
+            )
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
+
+                val updatedCategory = originalCategory.copy(
+                    name = formState.name.trim(),
+                    type = formState.type,
+                    targetAmount = formState.targetAmount.toDouble(),
+                    description = formState.description.trim()
+                )
+
+                val result = repository.updateCategory(updatedCategory)
+
+                if (result.isSuccess) {
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        categoryUpdated = true
+                    )
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        errorMessage = "Failed to update category: ${result.exceptionOrNull()?.message}"
+                    )
+                }
+
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = "Failed to update category: ${e.message}"
+                )
+            }
+        }
+    }
+
     fun clearError() {
         _uiState.value = _uiState.value.copy(errorMessage = null)
     }
@@ -106,7 +192,10 @@ class CategoryViewModel @Inject constructor(
     fun resetForm() {
         _uiState.value = _uiState.value.copy(
             formState = CategoryFormState(),
-            categoryCreated = false
+            categoryCreated = false,
+            categoryUpdated = false,
+            isEditMode = false,
+            originalCategory = null
         )
     }
 
@@ -114,7 +203,11 @@ class CategoryViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(categoryCreated = false)
     }
 
-    // Delegate to repository for data access - now using suspend functions
+    fun markCategoryUpdatedHandled() {
+        _uiState.value = _uiState.value.copy(categoryUpdated = false)
+    }
+
+    // Delegate to repository for data access
     suspend fun getCategoriesByType(type: CategoryType) = repository.getCategoriesForCurrentMonthByType(type)
     suspend fun getAllCategories() = repository.getCategoriesForCurrentMonth()
     suspend fun getTotalIncome() = repository.getTotalIncome()
