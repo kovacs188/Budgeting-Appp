@@ -113,14 +113,16 @@ fun CategoryTypeDetailsScreen(
             ) {
                 item {
                     Spacer(modifier = Modifier.height(8.dp))
-                    SectionHeader(getCategoryTypeDisplayName(categoryType)) // Now resolved
+                    SectionHeader(getCategoryTypeDisplayName(categoryType))
                 }
 
                 if (uiState.categories.isEmpty()) {
-                    item { CategoryPlaceholder("No ${getCategoryTypeDisplayName(categoryType).lowercase()} categories yet") } // Now resolved
+                    item {
+                        CategoryPlaceholder("No ${getCategoryTypeDisplayName(categoryType).lowercase()} categories yet")
+                    }
                 } else {
                     items(uiState.categories) { category ->
-                        CategoryCard( // Now resolved
+                        CategoryCard(
                             category = category,
                             onViewTransactions = { onNavigateToTransactionHistory(category.id) },
                             onQuickAddTransaction = { selectedCategoryForQuickAdd = category }
@@ -147,6 +149,7 @@ fun CategoryTypeDetailsScreen(
     }
 }
 
+// Helper function to get display names for category types
 private fun getCategoryTypeDisplayName(type: CategoryType): String {
     return when (type) {
         CategoryType.INCOME -> "Income Categories"

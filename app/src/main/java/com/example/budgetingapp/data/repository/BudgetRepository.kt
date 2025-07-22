@@ -22,11 +22,6 @@ import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// Ensure these specific imports are GONE. The functions should resolve implicitly.
-// import kotlin.collections.sumOf
-// import kotlin.collections.maxByOrNull
-// import kotlin.collections.size
-
 @Singleton
 class BudgetRepository @Inject constructor(
     private val monthDao: MonthDao,
@@ -59,16 +54,155 @@ class BudgetRepository @Inject constructor(
         if (existingMonth != null) {
             _currentMonthFlow.value = existingMonth
         } else {
-            // If current month doesn't exist, create it and potentially roll over budget
+            // If current month doesn't exist, create it with full rollover
             val currentMonth = Month.createCurrentMonth()
             monthDao.insertMonth(currentMonth)
             _currentMonthFlow.value = currentMonth
-            // No rollover from 'null' previous month on first app launch
+
+            // Perform rollover from previous month if it exists
+            val prevDate = now.minusMonths(1)
+            val previousMonth = monthDao.getMonthByYearAndMonth(prevDate.year, prevDate.monthValue)
+            if (previousMonth != null) {
+                performBudgetRollover(currentMonth, now.withDayOfMonth(1))
+            }
         }
     }
 
-    // Get or create a month for specific year/month
+    // New: Check if a month is "preview only" (created but not committed)
+    suspend fun isMonthPreviewOnly(monthId: String): Boolean {
+        val month = monthDao.getMonthById(monthId) ?: return false
+        val transactions = getTransactionsForMonth(monthId)
+        val categories = getCategoriesForMonth(monthId)
+
+        // Consider it preview-only if:
+        // 1. No manual transactions (only auto-filled fixed expenses)
+        // 2. Categories have preview descriptions or very few categories
+        val hasManualTransactions = transactions.any {
+            !it.description.contains("Auto-filled") && !it.description.contains("Preview")
+        }
+        val hasPreviewCategories = categories.any {
+            it.description.contains("Preview - adjust as needed")
+        }
+
+        return !hasManualTransactions && (hasPreviewCategories || categories.size <= 2)
+    }
+
+    // Enhanced: Get or create month with preview mode detection
     suspend fun getOrCreateMonth(year: Int, monthValue: Int): Month {
+        val existingMonth = monthDao.getMonthByYearAndMonth(year, monthValue)
+
+        return if (existingMonth != null) {
+            _currentMonthFlow.value = existingMonth
+            existingMonth
+        } else {
+            val newMonth = createNewMonth(year, monthValue)
+            _currentMonthFlow.value = newMonth
+            newMonth
+        }
+    }
+
+    private suspend fun createNewMonth(year: Int, monthValue: Int): Month {
+        val newMonthDate = LocalDate.of(year, monthValue, 1)
+        val currentDate = LocalDate.now()
+
+        // Determine if this should be a preview month
+        val isFutureMonth = newMonthDate.isAfter(currentDate.withDayOfMonth(1))
+
+        val newMonth = Month(
+            name = newMonthDate.format(DateTimeFormatter.ofPattern("MMMM")),
+            year = newMonthDate.year,
+            month = newMonthDate.monthValue
+        )
+        monthDao.insertMonth(newMonth)
+
+        if (isFutureMonth) {
+            // Create preview structure for future months
+            createPreviewCategories(newMonth)
+        } else {
+            // For current/past months, do full rollover
+            performBudgetRollover(newMonth, newMonthDate)
+        }
+
+        return newMonth
+    }
+
+    private suspend fun performBudgetRollover(newMonth: Month, newMonthDate: LocalDate) {
+        val previousMonthDate = newMonthDate.minusMonths(1)
+        val previousMonth = monthDao.getMonthByYearAndMonth(
+            previousMonthDate.year,
+            previousMonthDate.monthValue
+        )
+
+        if (previousMonth != null) {
+            val previousCategories = categoryDao.getCategoriesForMonth(previousMonth.id).first()
+
+            previousCategories.forEach { oldCategory ->
+                val newCategory = oldCategory.copy(
+                    id = Category.generateCategoryId(),
+                    monthId = newMonth.id,
+                    actualAmount = 0.0,
+                    createdDate = java.time.LocalDateTime.now()
+                )
+                categoryDao.insertCategory(newCategory)
+
+                // Auto-fill fixed expenses
+                if (newCategory.type == CategoryType.FIXED_EXPENSE && newCategory.targetAmount > 0) {
+                    val autoTransaction = Transaction(
+                        categoryId = newCategory.id,
+                        amount = newCategory.targetAmount,
+                        description = "Auto-filled fixed expense for new month",
+                        date = newMonthDate.withDayOfMonth(1)
+                    )
+                    transactionDao.insertTransaction(autoTransaction)
+                }
+            }
+        }
+    }
+
+    private suspend fun createPreviewCategories(newMonth: Month) {
+        // Create basic category structure for preview without auto-filling
+        val basicCategories = listOf(
+            Category(
+                name = "Income",
+                type = CategoryType.INCOME,
+                targetAmount = 0.0,
+                monthId = newMonth.id,
+                description = "Preview - adjust as needed"
+            ),
+            Category(
+                name = "Fixed Expenses",
+                type = CategoryType.FIXED_EXPENSE,
+                targetAmount = 0.0,
+                monthId = newMonth.id,
+                description = "Preview - adjust as needed"
+            )
+        )
+
+        basicCategories.forEach { category ->
+            categoryDao.insertCategory(category)
+        }
+    }
+
+    // New: Convert preview month to committed month
+    suspend fun commitPreviewMonth(monthId: String): Result<Unit> {
+        return try {
+            val month = monthDao.getMonthById(monthId)
+            if (month != null && isMonthPreviewOnly(monthId)) {
+                // Clear preview categories
+                categoryDao.deleteCategoriesForMonth(monthId)
+
+                // Perform full rollover now
+                val monthDate = LocalDate.of(month.year, month.month, 1)
+                performBudgetRollover(month, monthDate)
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // Get or create a month for specific year/month (keeping original for compatibility)
+    suspend fun getOrCreateMonthLegacy(year: Int, monthValue: Int): Month {
         val existingMonth = monthDao.getMonthByYearAndMonth(year, monthValue)
 
         return if (existingMonth != null) {
@@ -152,32 +286,69 @@ class BudgetRepository @Inject constructor(
         return monthDao.getAllActiveMonths().first()
     }
 
-    suspend fun deleteMonth(monthId: String): Result<Unit> {
+    // Enhanced: Delete month with safety checks
+    suspend fun deleteMonth(monthId: String, force: Boolean = false): Result<Unit> {
         return try {
-            // Get categories for this month
+            val month = monthDao.getMonthById(monthId)
+            if (month == null) {
+                return Result.failure(Exception("Month not found"))
+            }
+
+            val currentDate = LocalDate.now()
+            val monthDate = LocalDate.of(month.year, month.month, 1)
+            val isCurrentOrPastMonth = !monthDate.isAfter(currentDate.withDayOfMonth(1))
+
+            // Safety checks
+            if (!force && isCurrentOrPastMonth) {
+                return Result.failure(Exception("Cannot delete current or past months without force flag"))
+            }
+
+            if (!force && !isMonthPreviewOnly(monthId)) {
+                return Result.failure(Exception("Month has been modified. Use individual category deletion or force delete."))
+            }
+
+            // Proceed with deletion
             val categories = categoryDao.getCategoriesForMonth(monthId).first()
             val categoryIds = categories.map { it.id }
 
-            // Delete transactions for these categories
             if (categoryIds.isNotEmpty()) {
                 transactionDao.deleteTransactionsForCategories(categoryIds)
             }
 
-            // Delete categories for this month
             categoryDao.deleteCategoriesForMonth(monthId)
-
-            // Delete the month
             monthDao.deleteMonth(monthId)
 
-            // If we deleted the current month, clear it
             if (_currentMonthFlow.value?.id == monthId) {
                 _currentMonthFlow.value = null
-                ensureCurrentMonthExists() // Create current month again
+                ensureCurrentMonthExists()
             }
 
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    // Helper: Get months that can be safely deleted
+    suspend fun getDeletableMonths(): List<Month> {
+        val allMonths = getAllMonths()
+        val currentDate = LocalDate.now()
+
+        return allMonths.filter { month ->
+            val monthDate = LocalDate.of(month.year, month.month, 1)
+            val isFutureMonth = monthDate.isAfter(currentDate.withDayOfMonth(1))
+            isFutureMonth && isMonthPreviewOnly(month.id)
+        }
+    }
+
+    // Helper: Get transactions for a specific month
+    private suspend fun getTransactionsForMonth(monthId: String): List<Transaction> {
+        val categories = categoryDao.getCategoriesForMonth(monthId).first()
+        val categoryIds = categories.map { it.id }
+        return if (categoryIds.isNotEmpty()) {
+            transactionDao.getTransactionsForCategories(categoryIds)
+        } else {
+            emptyList()
         }
     }
 
@@ -356,7 +527,7 @@ class BudgetRepository @Inject constructor(
 
     // Transaction summaries
     suspend fun getTransactionSummaryForCategory(categoryId: String): TransactionSummary {
-        val categoryTransactions = getTransactionsForCategory(categoryId).first()
+        val categoryTransactions = getTransactionsForCategory(categoryId)
         return TransactionSummary(
             categoryId = categoryId,
             totalAmount = categoryTransactions.sumOf { it.amount },
