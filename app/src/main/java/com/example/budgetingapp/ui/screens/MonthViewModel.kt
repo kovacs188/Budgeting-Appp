@@ -2,16 +2,16 @@ package com.example.budgetingapp.ui.screens
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.budgetingapp.data.model.Category
+import com.example.budgetingapp.data.model.CategoryType
+import com.example.budgetingapp.data.model.Month
+import com.example.budgetingapp.data.repository.BudgetRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
-import com.example.budgetingapp.data.model.Month
-import com.example.budgetingapp.data.model.Category
-import com.example.budgetingapp.data.model.CategoryType
-import com.example.budgetingapp.data.repository.BudgetRepository
 import javax.inject.Inject
 
 data class MonthUiState(
@@ -41,38 +41,95 @@ class MonthViewModel @Inject constructor(
         viewModelScope.launch {
             combine(
                 repository.currentMonthFlow,
-                repository.categoriesFlow
-            ) { month, categories ->
-                updateUiState(month, categories)
-            }.collect { /* State is updated in updateUiState */ }
+                repository.categoriesFlow,
+                repository.transactionsFlow // Add transactions flow to trigger updates
+            ) { month, categories, transactions ->
+                Triple(month, categories, transactions)
+            }.collect { (month, categories, transactions) ->
+                updateUiState(month)
+            }
         }
     }
 
-    private fun updateUiState(month: Month?, allCategories: List<Category>) {
-        val currentMonthId = month?.id ?: ""
-        val monthCategories = allCategories.filter { it.monthId == currentMonthId && it.isActive }
+    private suspend fun updateUiState(month: Month?) {
+        try {
+            if (month == null) {
+                _uiState.value = _uiState.value.copy(
+                    currentMonth = null,
+                    categories = emptyList(),
+                    totalIncome = 0.0,
+                    totalExpenses = 0.0,
+                    remainingBudget = 0.0,
+                    incomeCategories = emptyList(),
+                    fixedExpenseCategories = emptyList(),
+                    variableExpenseCategories = emptyList(),
+                    discretionaryExpenseCategories = emptyList(),
+                    isLoading = false
+                )
+                return
+            }
 
-        val incomeCategories = monthCategories.filter { it.type == CategoryType.INCOME }
-        val fixedExpenseCategories = monthCategories.filter { it.type == CategoryType.FIXED_EXPENSE }
-        val variableExpenseCategories = monthCategories.filter { it.type == CategoryType.VARIABLE_EXPENSE }
-        val discretionaryExpenseCategories = monthCategories.filter { it.type == CategoryType.DISCRETIONARY_EXPENSE }
+            // Get categories with calculated actual amounts
+            val monthCategories = repository.getCategoriesForCurrentMonth()
 
-        val totalIncome = repository.getTotalIncome()
-        val totalExpenses = repository.getTotalExpenses()
-        val remainingBudget = totalIncome - totalExpenses
+            val incomeCategories = monthCategories.filter { it.type == CategoryType.INCOME }
+            val fixedExpenseCategories = monthCategories.filter { it.type == CategoryType.FIXED_EXPENSE }
+            val variableExpenseCategories = monthCategories.filter { it.type == CategoryType.VARIABLE_EXPENSE }
+            val discretionaryExpenseCategories = monthCategories.filter { it.type == CategoryType.DISCRETIONARY_EXPENSE }
 
-        _uiState.value = _uiState.value.copy(
-            currentMonth = month,
-            categories = monthCategories,
-            totalIncome = totalIncome,
-            totalExpenses = totalExpenses,
-            remainingBudget = remainingBudget,
-            incomeCategories = incomeCategories,
-            fixedExpenseCategories = fixedExpenseCategories,
-            variableExpenseCategories = variableExpenseCategories,
-            discretionaryExpenseCategories = discretionaryExpenseCategories,
-            isLoading = false
-        )
+            val totalIncome = repository.getTotalIncome()
+            val totalExpenses = repository.getTotalExpenses()
+            val remainingBudget = totalIncome - totalExpenses
+
+            _uiState.value = _uiState.value.copy(
+                currentMonth = month,
+                categories = monthCategories,
+                totalIncome = totalIncome,
+                totalExpenses = totalExpenses,
+                remainingBudget = remainingBudget,
+                incomeCategories = incomeCategories,
+                fixedExpenseCategories = fixedExpenseCategories,
+                variableExpenseCategories = variableExpenseCategories,
+                discretionaryExpenseCategories = discretionaryExpenseCategories,
+                isLoading = false
+            )
+        } catch (e: Exception) {
+            _uiState.value = _uiState.value.copy(
+                isLoading = false,
+                errorMessage = "Failed to update UI: ${e.message}"
+            )
+        }
+    }
+
+    // MONTH NAVIGATION FUNCTIONS
+    fun navigateToPreviousMonth() {
+        viewModelScope.launch {
+            try {
+                _uiState.value = _uiState.value.copy(isLoading = true)
+                repository.navigateToPreviousMonth()
+                _uiState.value = _uiState.value.copy(isLoading = false)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = "Failed to navigate to previous month: ${e.message}"
+                )
+            }
+        }
+    }
+
+    fun navigateToNextMonth() {
+        viewModelScope.launch {
+            try {
+                _uiState.value = _uiState.value.copy(isLoading = true)
+                repository.navigateToNextMonth()
+                _uiState.value = _uiState.value.copy(isLoading = false)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = "Failed to navigate to next month: ${e.message}"
+                )
+            }
+        }
     }
 
     fun onCreateCategoryClicked() {
@@ -83,10 +140,8 @@ class MonthViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 _uiState.value = _uiState.value.copy(isLoading = true)
-                // Repository data is already reactive, so just trigger update
                 val currentMonth = repository.getCurrentMonth()
-                val categories = repository.getCategoriesForCurrentMonth()
-                updateUiState(currentMonth, categories)
+                updateUiState(currentMonth)
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,

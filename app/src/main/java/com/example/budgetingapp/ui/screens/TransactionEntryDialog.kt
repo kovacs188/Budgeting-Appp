@@ -1,11 +1,41 @@
 package com.example.budgetingapp.ui.screens
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -15,6 +45,9 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.budgetingapp.data.model.Category
 import com.example.budgetingapp.data.model.CategoryType
+import com.example.budgetingapp.data.model.Transaction
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -22,17 +55,24 @@ fun TransactionEntryDialog(
     category: Category,
     onDismiss: () -> Unit,
     onTransactionAdded: () -> Unit,
+    existingTransaction: Transaction? = null,
     viewModel: TransactionViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    var showDatePicker by remember { mutableStateOf(false) }
+    val isEditing = existingTransaction != null
 
     // Reset form when dialog opens
-    LaunchedEffect(category.id) {
-        viewModel.resetForm()
-        viewModel.setCategoryId(category.id)
+    LaunchedEffect(category.id, existingTransaction?.id) {
+        if (isEditing && existingTransaction != null) {
+            viewModel.initializeForEdit(existingTransaction)
+        } else {
+            viewModel.resetForm()
+            viewModel.setCategoryId(category.id)
+        }
     }
 
-    // Handle successful transaction creation
+    // Handle successful transaction creation/update
     LaunchedEffect(uiState.transactionCreated) {
         if (uiState.transactionCreated) {
             onTransactionAdded()
@@ -59,7 +99,7 @@ fun TransactionEntryDialog(
             ) {
                 Column {
                     Text(
-                        text = getTransactionTitle(category.type),
+                        text = if (isEditing) "Edit Transaction" else getTransactionTitle(category.type),
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold
                     )
@@ -161,6 +201,23 @@ fun TransactionEntryDialog(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
             )
 
+            // Date picker
+            OutlinedTextField(
+                value = uiState.formState.date.format(DateTimeFormatter.ofPattern("MMM dd, yyyy")),
+                onValueChange = { },
+                label = { Text("Date") },
+                readOnly = true,
+                trailingIcon = {
+                    IconButton(onClick = { showDatePicker = true }) {
+                        Icon(
+                            imageVector = Icons.Default.DateRange,
+                            contentDescription = "Pick Date"
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+
             // Description input
             OutlinedTextField(
                 value = uiState.formState.description,
@@ -170,41 +227,6 @@ fun TransactionEntryDialog(
                 modifier = Modifier.fillMaxWidth(),
                 maxLines = 3
             )
-
-            // Quick amount buttons (for common amounts)
-            if (category.type != CategoryType.INCOME) {
-                Text(
-                    text = "Quick Amounts",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Medium
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    QuickAmountButton(
-                        amount = "10",
-                        modifier = Modifier.weight(1f),
-                        onClick = { viewModel.updateAmount("10.00") }
-                    )
-                    QuickAmountButton(
-                        amount = "25",
-                        modifier = Modifier.weight(1f),
-                        onClick = { viewModel.updateAmount("25.00") }
-                    )
-                    QuickAmountButton(
-                        amount = "50",
-                        modifier = Modifier.weight(1f),
-                        onClick = { viewModel.updateAmount("50.00") }
-                    )
-                    QuickAmountButton(
-                        amount = "100",
-                        modifier = Modifier.weight(1f),
-                        onClick = { viewModel.updateAmount("100.00") }
-                    )
-                }
-            }
 
             // Error message
             uiState.errorMessage?.let { errorMessage ->
@@ -222,9 +244,15 @@ fun TransactionEntryDialog(
                 }
             }
 
-            // Add transaction button
+            // Add/Update transaction button
             Button(
-                onClick = { viewModel.createTransaction() },
+                onClick = {
+                    if (isEditing) {
+                        viewModel.updateTransaction()
+                    } else {
+                        viewModel.createTransaction()
+                    }
+                },
                 enabled = uiState.formState.isValid && !uiState.isLoading,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -240,7 +268,7 @@ fun TransactionEntryDialog(
                     )
                 } else {
                     Text(
-                        text = getButtonText(category.type),
+                        text = if (isEditing) "Update Transaction" else getButtonText(category.type),
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -251,23 +279,36 @@ fun TransactionEntryDialog(
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
-}
 
-@Composable
-private fun QuickAmountButton(
-    amount: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    OutlinedButton(
-        onClick = onClick,
-        modifier = modifier,
-        contentPadding = PaddingValues(8.dp)
-    ) {
-        Text(
-            text = "$$amount",
-            fontSize = 14.sp
+    // Date picker dialog
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = uiState.formState.date.toEpochDay() * 24 * 60 * 60 * 1000
         )
+
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { millis ->
+                            val selectedDate = LocalDate.ofEpochDay(millis / (24 * 60 * 60 * 1000))
+                            viewModel.updateDate(selectedDate)
+                        }
+                        showDatePicker = false
+                    }
+                ) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
     }
 }
 

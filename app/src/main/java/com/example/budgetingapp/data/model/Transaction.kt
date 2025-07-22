@@ -2,7 +2,7 @@ package com.example.budgetingapp.data.model
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
-import java.time.LocalDateTime
+import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
 @Entity(tableName = "transactions")
@@ -12,17 +12,11 @@ data class Transaction(
     val categoryId: String,
     val amount: Double,
     val description: String = "",
-    val date: LocalDateTime = LocalDateTime.now(),
+    val date: LocalDate = LocalDate.now(),
     val isActive: Boolean = true
 ) {
     val displayDate: String
         get() = date.format(DateTimeFormatter.ofPattern("MMM dd, yyyy"))
-
-    val displayTime: String
-        get() = date.format(DateTimeFormatter.ofPattern("h:mm a"))
-
-    val displayDateTime: String
-        get() = date.format(DateTimeFormatter.ofPattern("MMM dd, yyyy 'at' h:mm a"))
 
     companion object {
         private fun generateTransactionId(): String {
@@ -35,6 +29,7 @@ data class Transaction(
 data class TransactionFormState(
     val amount: String = "",
     val description: String = "",
+    val date: LocalDate = LocalDate.now(),
     val amountError: String? = null,
     val isValid: Boolean = false
 ) {
@@ -59,7 +54,7 @@ data class TransactionSummary(
     val categoryId: String,
     val totalAmount: Double,
     val transactionCount: Int,
-    val lastTransactionDate: LocalDateTime?
+    val lastTransactionDate: LocalDate?
 )
 
 // Enum for transaction sorting

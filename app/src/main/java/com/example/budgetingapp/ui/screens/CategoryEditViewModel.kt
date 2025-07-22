@@ -2,34 +2,46 @@ package com.example.budgetingapp.ui.screens
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.budgetingapp.data.model.Category
-import com.example.budgetingapp.data.model.CategoryFormState
-import com.example.budgetingapp.data.model.CategoryType
-import com.example.budgetingapp.data.repository.BudgetRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import com.example.budgetingapp.data.model.Category
+import com.example.budgetingapp.data.model.CategoryFormState
+import com.example.budgetingapp.data.model.CategoryType
+import com.example.budgetingapp.data.repository.BudgetRepository
 import javax.inject.Inject
 
-data class CategoryUiState(
+data class CategoryEditUiState(
     val formState: CategoryFormState = CategoryFormState(),
+    val originalCategory: Category? = null,
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
-    val categoryCreated: Boolean = false
+    val categoryUpdated: Boolean = false
 )
 
 @HiltViewModel
-class CategoryViewModel @Inject constructor(
+class CategoryEditViewModel @Inject constructor(
     private val repository: BudgetRepository
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(CategoryUiState())
-    val uiState: StateFlow<CategoryUiState> = _uiState.asStateFlow()
+    private val _uiState = MutableStateFlow(CategoryEditUiState())
+    val uiState: StateFlow<CategoryEditUiState> = _uiState.asStateFlow()
 
-    // Expose repository's categories flow
-    val categoriesFlow = repository.categoriesFlow
+    fun initializeWithCategory(category: Category) {
+        val formState = CategoryFormState(
+            name = category.name,
+            type = category.type,
+            targetAmount = category.targetAmount.toString(),
+            description = category.description
+        ).validate()
+
+        _uiState.value = _uiState.value.copy(
+            formState = formState,
+            originalCategory = category
+        )
+    }
 
     fun updateName(name: String) {
         val currentForm = _uiState.value.formState
@@ -55,7 +67,7 @@ class CategoryViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(formState = updatedForm)
     }
 
-    fun createCategory() {
+    fun updateCategory() {
         val formState = _uiState.value.formState.validate()
         _uiState.value = _uiState.value.copy(formState = formState)
 
@@ -63,37 +75,43 @@ class CategoryViewModel @Inject constructor(
             return
         }
 
+        val originalCategory = _uiState.value.originalCategory
+        if (originalCategory == null) {
+            _uiState.value = _uiState.value.copy(
+                errorMessage = "Original category not found"
+            )
+            return
+        }
+
         viewModelScope.launch {
             try {
-                _uiState.value = _uiState.value.copy(isLoading = true)
+                _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
 
-                val category = Category(
+                val updatedCategory = originalCategory.copy(
                     name = formState.name.trim(),
                     type = formState.type,
                     targetAmount = formState.targetAmount.toDouble(),
-                    description = formState.description.trim(),
-                    monthId = repository.getCurrentMonth()?.id ?: "default_month"
+                    description = formState.description.trim()
                 )
 
-                val result = repository.createCategory(category)
+                val result = repository.updateCategory(updatedCategory)
 
                 if (result.isSuccess) {
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        categoryCreated = true,
-                        formState = CategoryFormState() // Reset form
+                        categoryUpdated = true
                     )
                 } else {
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        errorMessage = "Failed to create category: ${result.exceptionOrNull()?.message}"
+                        errorMessage = "Failed to update category: ${result.exceptionOrNull()?.message}"
                     )
                 }
 
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    errorMessage = "Failed to create category: ${e.message}"
+                    errorMessage = "Failed to update category: ${e.message}"
                 )
             }
         }
@@ -103,22 +121,7 @@ class CategoryViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(errorMessage = null)
     }
 
-    fun resetForm() {
-        _uiState.value = _uiState.value.copy(
-            formState = CategoryFormState(),
-            categoryCreated = false
-        )
+    fun markCategoryUpdatedHandled() {
+        _uiState.value = _uiState.value.copy(categoryUpdated = false)
     }
-
-    fun markCategoryCreatedHandled() {
-        _uiState.value = _uiState.value.copy(categoryCreated = false)
-    }
-
-    // Delegate to repository for data access - now using suspend functions
-    suspend fun getCategoriesByType(type: CategoryType) = repository.getCategoriesForCurrentMonthByType(type)
-    suspend fun getAllCategories() = repository.getCategoriesForCurrentMonth()
-    suspend fun getTotalIncome() = repository.getTotalIncome()
-    suspend fun getTotalExpenses() = repository.getTotalExpenses()
-    suspend fun getTotalByType(type: CategoryType) = repository.getTotalByType(type)
-    suspend fun getRemainingBudget() = repository.getRemainingBudget()
 }
