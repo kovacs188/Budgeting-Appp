@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.budgetingapp.data.model.Category
 import com.example.budgetingapp.data.model.CategoryType
+import com.example.budgetingapp.data.model.Month
 import com.example.budgetingapp.data.model.Transaction
 import com.example.budgetingapp.data.model.TransactionFormState
 import com.example.budgetingapp.data.repository.BudgetRepository
@@ -11,6 +12,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import javax.inject.Inject
@@ -43,7 +45,8 @@ data class HomeUiState(
     val categorySummaries: List<CategorySummary> = emptyList(),
     val monthlyData: List<MonthlyData> = emptyList(),
     val transactionSubmitted: Boolean = false,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val currentMonth: Month? = null
 )
 
 @HiltViewModel
@@ -55,37 +58,43 @@ class HomeViewModel @Inject constructor(
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
     init {
-        loadData()
+        viewModelScope.launch {
+            combine(
+                repository.currentMonthFlow,
+                repository.categoriesFlow,
+                repository.transactionsFlow
+            ) { currentMonthFromRepo, _, _ ->
+                _uiState.value = _uiState.value.copy(currentMonth = currentMonthFromRepo)
+                updateDashboardData()
+            }.collect {}
+        }
     }
 
-    private fun loadData() {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
+    private suspend fun updateDashboardData() {
+        _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
 
-            try {
-                // Load current month category summaries
-                val categorySummaries = loadCategorySummaries()
+        try {
+            val categorySummaries = loadCategorySummaries()
+            val monthlyData = loadMonthlyData()
 
-                // Load 12-month historical data
-                val monthlyData = loadMonthlyData()
+            val currentSelectedCategoryType = _uiState.value.selectedCategoryType
+            val availableCategories = repository.getCategoriesForCurrentMonthByType(currentSelectedCategoryType)
 
-                // Load discretionary categories by default for quick entry
-                val discretionaryCategories = repository.getCategoriesForCurrentMonthByType(CategoryType.DISCRETIONARY_EXPENSE)
+            _uiState.value = _uiState.value.copy(
+                isLoading = false,
+                categorySummaries = categorySummaries,
+                monthlyData = monthlyData,
+                availableCategories = availableCategories,
+                selectedCategory = _uiState.value.selectedCategory?.let { currentCat ->
+                    availableCategories.find { it.id == currentCat.id }
+                } ?: availableCategories.firstOrNull()
+            )
 
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    categorySummaries = categorySummaries,
-                    monthlyData = monthlyData,
-                    availableCategories = discretionaryCategories,
-                    selectedCategory = discretionaryCategories.firstOrNull()
-                )
-
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    errorMessage = "Failed to load data: ${e.message}"
-                )
-            }
+        } catch (e: Exception) {
+            _uiState.value = _uiState.value.copy(
+                isLoading = false,
+                errorMessage = "Failed to load dashboard data: ${e.message}"
+            )
         }
     }
 
@@ -116,10 +125,37 @@ class HomeViewModel @Inject constructor(
                     expenses = expenses,
                     savings = income - expenses
                 )
-            }.reversed() // Show oldest to newest
+            }.reversed()
         } catch (e: Exception) {
-            // Return empty list if there's an error loading monthly data
             emptyList()
+        }
+    }
+
+    fun navigateToPreviousMonth() {
+        viewModelScope.launch {
+            try {
+                _uiState.value = _uiState.value.copy(isLoading = true)
+                repository.navigateToPreviousMonth()
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = "Failed to navigate to previous month: ${e.message}"
+                )
+            }
+        }
+    }
+
+    fun navigateToNextMonth() {
+        viewModelScope.launch {
+            try {
+                _uiState.value = _uiState.value.copy(isLoading = true)
+                repository.navigateToNextMonth()
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = "Failed to navigate to next month: ${e.message}"
+                )
+            }
         }
     }
 
@@ -153,7 +189,7 @@ class HomeViewModel @Inject constructor(
     fun updateQuickEntryDescription(description: String) {
         val currentForm = _uiState.value.quickEntryForm
         val updatedForm = currentForm.copy(description = description).validate()
-        _uiState.value = _uiState.value.copy(quickEntryForm = updatedForm)
+        _uiState.value = _uiState.value.copy(quickEntryForm = updatedForm) // CORRECTED LINE
     }
 
     fun updateQuickEntryDate(date: LocalDate) {
@@ -190,8 +226,6 @@ class HomeViewModel @Inject constructor(
                         transactionSubmitted = true,
                         quickEntryExpanded = false
                     )
-                    // Reload data to reflect the new transaction
-                    loadData()
                 } else {
                     _uiState.value = _uiState.value.copy(
                         errorMessage = "Failed to add transaction: ${result.exceptionOrNull()?.message}"

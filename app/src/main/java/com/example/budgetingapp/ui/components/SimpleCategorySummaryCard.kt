@@ -1,5 +1,6 @@
 package com.example.budgetingapp.ui.components
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,10 +22,13 @@ import com.example.budgetingapp.ui.screens.CategorySummary
 
 @Composable
 fun SimpleCategorySummaryCard(
-    summary: CategorySummary
+    summary: CategorySummary,
+    onClick: (CategoryType) -> Unit // New parameter for click handling
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick(summary.type) }, // Made the card clickable
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(
@@ -94,7 +98,11 @@ fun SimpleCategorySummaryCard(
                     Text(
                         text = "$${String.format("%.0f", summary.actual)}",
                         style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Medium,
+                        color = if (summary.isOverBudget && summary.type != CategoryType.INCOME)
+                            MaterialTheme.colorScheme.error
+                        else
+                            MaterialTheme.colorScheme.primary
                     )
                 }
 

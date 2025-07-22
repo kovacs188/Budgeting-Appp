@@ -269,9 +269,9 @@ fun CategoryCreationScreen(
                     Text(
                         text = when (formState.type) {
                             CategoryType.INCOME -> "Set your expected income amount. Earning more than this target is great!"
-                            CategoryType.FIXED_EXPENSE -> "Fixed expenses stay the same each month (rent, subscriptions, loans)."
-                            CategoryType.VARIABLE_EXPENSE -> "Variable expenses change monthly but are necessary (utilities, groceries)."
-                            CategoryType.DISCRETIONARY_EXPENSE -> "Discretionary expenses are optional spending you can control (dining out, entertainment)."
+                            CategoryType.FIXED_EXPENSE -> "Fixed expenses are automatically marked as 'spent' since they're predictable and consistent (rent, subscriptions, loans)."
+                            CategoryType.VARIABLE_EXPENSE -> "Variable expenses change monthly but are necessary (utilities, groceries). Track actual spending against your budget."
+                            CategoryType.DISCRETIONARY_EXPENSE -> "Discretionary expenses are optional spending you can control (dining out, entertainment). Track to stay within budget."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant

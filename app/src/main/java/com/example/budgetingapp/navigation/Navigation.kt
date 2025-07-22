@@ -4,21 +4,20 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import com.example.budgetingapp.data.model.CategoryType
 import com.example.budgetingapp.ui.screens.CategoryCreationScreen
+import com.example.budgetingapp.ui.screens.CategoryTypeDetailsScreen
 import com.example.budgetingapp.ui.screens.HomeScreen
-import com.example.budgetingapp.ui.screens.MonthScreen
-import com.example.budgetingapp.ui.screens.MonthsListScreen
 import com.example.budgetingapp.ui.screens.TransactionHistoryScreen
 
 sealed class Screen(val route: String) {
     object Home : Screen("home")
-    object CurrentMonth : Screen("current_month/{monthId}") {
-        fun createRoute(monthId: String) = "current_month/$monthId"
-    }
-    object MonthsList : Screen("months_list")
     object CategoryCreator : Screen("category_creator")
     object TransactionHistory : Screen("transaction_history/{categoryId}") {
         fun createRoute(categoryId: String) = "transaction_history/$categoryId"
+    }
+    object CategoryTypeDetails : Screen("category_type_details/{categoryType}") {
+        fun createRoute(categoryType: CategoryType) = "category_type_details/${categoryType.name}"
     }
 }
 
@@ -32,43 +31,15 @@ fun BudgetNavGraph(
     ) {
         composable(Screen.Home.route) {
             HomeScreen(
-                onNavigateToMonthView = {
-                    navController.navigate(Screen.MonthsList.route)
+                // Explicitly type the lambda parameter to help the compiler
+                onNavigateToCategoryTypeDetails = { categoryType: CategoryType ->
+                    navController.navigate(Screen.CategoryTypeDetails.createRoute(categoryType))
                 }
             )
         }
 
-        composable(Screen.CurrentMonth.route) { backStackEntry ->
-            val monthId = backStackEntry.arguments?.getString("monthId") ?: ""
-            MonthScreen(
-                monthId = monthId,
-                onNavigateBack = {
-                    navController.popBackStack()
-                },
-                onNavigateToHome = {
-                    navController.navigate(Screen.Home.route) {
-                        popUpTo(Screen.Home.route) { inclusive = true }
-                    }
-                },
-                onNavigateToCategories = {
-                    navController.navigate(Screen.CategoryCreator.route)
-                },
-                onNavigateToTransactionHistory = { categoryId ->
-                    navController.navigate(Screen.TransactionHistory.createRoute(categoryId))
-                }
-            )
-        }
-
-        composable(Screen.MonthsList.route) {
-            MonthsListScreen(
-                onNavigateToHome = {
-                    navController.popBackStack()
-                },
-                onNavigateToMonth = { monthId ->
-                    navController.navigate(Screen.CurrentMonth.createRoute(monthId))
-                }
-            )
-        }
+        // Removed MonthScreen and MonthsListScreen composables
+        // as per your plan for consolidation.
 
         composable(Screen.TransactionHistory.route) { backStackEntry ->
             val categoryId = backStackEntry.arguments?.getString("categoryId") ?: ""
@@ -92,6 +63,23 @@ fun BudgetNavGraph(
                 },
                 onCategoryCreated = {
                     navController.popBackStack()
+                }
+            )
+        }
+
+        composable(Screen.CategoryTypeDetails.route) { backStackEntry ->
+            val categoryTypeString = backStackEntry.arguments?.getString("categoryType") ?: ""
+            val categoryType = CategoryType.valueOf(categoryTypeString)
+            CategoryTypeDetailsScreen(
+                categoryType = categoryType,
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
+                onNavigateToTransactionHistory = { categoryId ->
+                    navController.navigate(Screen.TransactionHistory.createRoute(categoryId))
+                },
+                onNavigateToCategoryCreator = {
+                    navController.navigate(Screen.CategoryCreator.route)
                 }
             )
         }

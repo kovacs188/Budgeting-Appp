@@ -22,6 +22,11 @@ import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
 
+// Ensure these specific imports are GONE. The functions should resolve implicitly.
+// import kotlin.collections.sumOf
+// import kotlin.collections.maxByOrNull
+// import kotlin.collections.size
+
 @Singleton
 class BudgetRepository @Inject constructor(
     private val monthDao: MonthDao,
@@ -54,9 +59,11 @@ class BudgetRepository @Inject constructor(
         if (existingMonth != null) {
             _currentMonthFlow.value = existingMonth
         } else {
+            // If current month doesn't exist, create it and potentially roll over budget
             val currentMonth = Month.createCurrentMonth()
             monthDao.insertMonth(currentMonth)
             _currentMonthFlow.value = currentMonth
+            // No rollover from 'null' previous month on first app launch
         }
     }
 
@@ -68,12 +75,47 @@ class BudgetRepository @Inject constructor(
             _currentMonthFlow.value = existingMonth
             existingMonth
         } else {
+            // New month, so create it and perform rollover
+            val newMonthDate = LocalDate.of(year, monthValue, 1)
             val newMonth = Month(
-                name = LocalDate.of(year, monthValue, 1).format(DateTimeFormatter.ofPattern("MMMM")),
-                year = year,
-                month = monthValue
+                name = newMonthDate.format(DateTimeFormatter.ofPattern("MMMM")),
+                year = newMonthDate.year,
+                month = newMonthDate.monthValue
             )
-            monthDao.insertMonth(newMonth)
+            monthDao.insertMonth(newMonth) // Insert the new month first
+
+            // --- Budget Rollover Logic ---
+            val previousMonthDate = newMonthDate.minusMonths(1)
+            val previousMonth = monthDao.getMonthByYearAndMonth(previousMonthDate.year, previousMonthDate.monthValue)
+
+            if (previousMonth != null) {
+                val previousMonthCategories = categoryDao.getCategoriesForMonth(previousMonth.id).first()
+
+                previousMonthCategories.forEach { oldCategory ->
+                    val newCategory = oldCategory.copy(
+                        id = Category.generateCategoryId(), // Generate new ID for the copied category
+                        monthId = newMonth.id,              // Link to the new month
+                        actualAmount = 0.0,                 // Reset actual amount for the new month
+                        createdDate = java.time.LocalDateTime.now() // Set new creation date
+                    )
+                    categoryDao.insertCategory(newCategory)
+
+                    // --- Auto-fill Fixed Expenses ---
+                    if (newCategory.type == CategoryType.FIXED_EXPENSE) {
+                        if (newCategory.targetAmount > 0) { // Only pre-fill if there's a budget
+                            val autoTransaction = Transaction(
+                                categoryId = newCategory.id,
+                                amount = newCategory.targetAmount,
+                                description = "Auto-filled fixed expense for new month",
+                                date = newMonthDate.withDayOfMonth(1) // Set date to the first of the new month
+                            )
+                            transactionDao.insertTransaction(autoTransaction)
+                        }
+                    }
+                }
+            }
+            // --- End Budget Rollover Logic ---
+
             _currentMonthFlow.value = newMonth
             newMonth
         }
@@ -314,7 +356,7 @@ class BudgetRepository @Inject constructor(
 
     // Transaction summaries
     suspend fun getTransactionSummaryForCategory(categoryId: String): TransactionSummary {
-        val categoryTransactions = getTransactionsForCategory(categoryId)
+        val categoryTransactions = getTransactionsForCategory(categoryId).first()
         return TransactionSummary(
             categoryId = categoryId,
             totalAmount = categoryTransactions.sumOf { it.amount },

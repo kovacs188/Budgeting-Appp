@@ -45,7 +45,8 @@ data class Category(
         }
 
     companion object {
-        private fun generateCategoryId(): String {
+        // Change from private to internal
+        internal fun generateCategoryId(): String {
             return "category_${System.currentTimeMillis()}"
         }
     }

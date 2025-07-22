@@ -108,7 +108,13 @@ class CategoryViewModel @Inject constructor(
                     type = formState.type,
                     targetAmount = formState.targetAmount.toDouble(),
                     description = formState.description.trim(),
-                    monthId = repository.getCurrentMonth()?.id ?: "default_month"
+                    monthId = repository.getCurrentMonth()?.id ?: "default_month",
+                    // Auto-set actualAmount for fixed expenses
+                    actualAmount = if (formState.type == CategoryType.FIXED_EXPENSE) {
+                        formState.targetAmount.toDouble()
+                    } else {
+                        0.0
+                    }
                 )
 
                 val result = repository.createCategory(category)
