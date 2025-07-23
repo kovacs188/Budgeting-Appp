@@ -48,6 +48,17 @@ data class YearlyOverview(
     val actualSavings: Double get() = actualIncome - actualExpenses
 }
 
+// ** SIMPLE: Monthly Overview (same pattern as yearly) **
+data class MonthlyOverview(
+    val plannedIncome: Double,
+    val actualIncome: Double,
+    val plannedExpenses: Double,
+    val actualExpenses: Double
+) {
+    val plannedSavings: Double get() = plannedIncome - plannedExpenses
+    val actualSavings: Double get() = actualIncome - actualExpenses
+}
+
 data class HomeUiState(
     val isLoading: Boolean = true,
     val quickEntryExpanded: Boolean = false,
@@ -58,6 +69,7 @@ data class HomeUiState(
     val categorySummaries: List<CategorySummary> = emptyList(),
     val monthlyData: List<MonthlyData> = emptyList(),
     val yearlyOverview: YearlyOverview? = null,
+    val monthlyOverview: MonthlyOverview? = null, // ** SIMPLE: Added monthly overview **
     val transactionSubmitted: Boolean = false,
     val errorMessage: String? = null,
     val currentMonth: Month? = null,
@@ -85,9 +97,6 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    // ** THE FIX IS HERE **
-    // This function has been rewritten to process data from a single source of truth,
-    // ensuring all calculations are always in sync.
     private fun updateAllData(
         currentMonth: Month?,
         allMonths: List<Month>,
@@ -119,10 +128,17 @@ class HomeViewModel @Inject constructor(
             )
         }
 
-        // --- Yearly and Monthly Calculation (derived from the same source of truth) ---
-        val yearlyOverview = calculateYearlyOverview(allMonths, categoriesByMonthId)
+        // --- FIXED: Yearly and Monthly Calculation ---
+        val activeMonthIds = allMonths.map { it.id }.toSet()
+        val filteredCategoriesByMonthId = categoriesByMonthId.filterKeys { it in activeMonthIds }
+
+        val yearlyOverview = calculateYearlyOverview(allMonths, filteredCategoriesByMonthId)
+
+        // ** SIMPLE: Calculate Monthly Overview (just like yearly but for current month only) **
+        val monthlyOverview = calculateMonthlyOverview(currentMonth, filteredCategoriesByMonthId)
+
         val monthlyData = allMonths.take(12).map { month ->
-            val categoriesForMonth = categoriesByMonthId[month.id] ?: emptyList()
+            val categoriesForMonth = filteredCategoriesByMonthId[month.id] ?: emptyList()
             val income = categoriesForMonth.filter { it.type == CategoryType.INCOME }.sumOf { it.actualAmount }
             val expenses = categoriesForMonth.filter { it.type != CategoryType.INCOME }.sumOf { it.actualAmount }
             MonthlyData(
@@ -144,8 +160,42 @@ class HomeViewModel @Inject constructor(
             categorySummaries = summaries,
             monthlyData = monthlyData,
             yearlyOverview = yearlyOverview,
+            monthlyOverview = monthlyOverview, // ** SIMPLE: Add monthly overview **
             availableCategories = available,
             selectedCategory = _uiState.value.selectedCategory?.let { current -> available.find { it.id == current.id } } ?: available.firstOrNull()
+        )
+    }
+
+    // ** SIMPLE: Calculate Monthly Overview (same pattern as yearly) **
+    private fun calculateMonthlyOverview(
+        currentMonth: Month?,
+        categoriesByMonthId: Map<String, List<Category>>
+    ): MonthlyOverview? {
+        if (currentMonth == null) return null
+
+        val categoriesForMonth = categoriesByMonthId[currentMonth.id] ?: emptyList()
+
+        val plannedIncome = categoriesForMonth
+            .filter { it.type == CategoryType.INCOME }
+            .sumOf { it.targetAmount }
+
+        val plannedExpenses = categoriesForMonth
+            .filter { it.type != CategoryType.INCOME }
+            .sumOf { it.targetAmount }
+
+        val actualIncome = categoriesForMonth
+            .filter { it.type == CategoryType.INCOME }
+            .sumOf { it.actualAmount }
+
+        val actualExpenses = categoriesForMonth
+            .filter { it.type != CategoryType.INCOME }
+            .sumOf { it.actualAmount }
+
+        return MonthlyOverview(
+            plannedIncome = plannedIncome,
+            actualIncome = actualIncome,
+            plannedExpenses = plannedExpenses,
+            actualExpenses = actualExpenses
         )
     }
 
@@ -161,11 +211,21 @@ class HomeViewModel @Inject constructor(
         allMonths.take(12).forEach { month ->
             val categoriesForMonth = categoriesByMonthId[month.id] ?: emptyList()
 
-            plannedIncome += categoriesForMonth.filter { it.type == CategoryType.INCOME }.sumOf { it.targetAmount }
-            plannedExpenses += categoriesForMonth.filter { it.type != CategoryType.INCOME }.sumOf { it.targetAmount }
+            plannedIncome += categoriesForMonth
+                .filter { it.type == CategoryType.INCOME }
+                .sumOf { it.targetAmount }
 
-            actualIncome += categoriesForMonth.filter { it.type == CategoryType.INCOME }.sumOf { it.actualAmount }
-            actualExpenses += categoriesForMonth.filter { it.type != CategoryType.INCOME }.sumOf { it.actualAmount }
+            plannedExpenses += categoriesForMonth
+                .filter { it.type != CategoryType.INCOME }
+                .sumOf { it.targetAmount }
+
+            actualIncome += categoriesForMonth
+                .filter { it.type == CategoryType.INCOME }
+                .sumOf { it.actualAmount }
+
+            actualExpenses += categoriesForMonth
+                .filter { it.type != CategoryType.INCOME }
+                .sumOf { it.actualAmount }
         }
 
         return YearlyOverview(

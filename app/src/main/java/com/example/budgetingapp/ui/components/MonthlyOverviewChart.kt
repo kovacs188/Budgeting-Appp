@@ -18,18 +18,57 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.budgetingapp.ui.screens.MonthlyData
+import com.example.budgetingapp.ui.screens.MonthlyOverview
 import com.example.budgetingapp.ui.screens.YearlyOverview
 
 @Composable
 fun MonthlyOverviewChart(
     monthlyData: List<MonthlyData>,
-    yearlyOverview: YearlyOverview? = null
+    yearlyOverview: YearlyOverview? = null,
+    monthlyOverview: MonthlyOverview? = null // ** SIMPLE: Added monthly overview parameter **
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
+
+            // ** SIMPLE: Monthly Overview Section (same pattern as yearly) **
+            monthlyOverview?.let {
+                Text(
+                    "This Month's Overview",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceAround
+                ) {
+                    GoalVsActualCard(
+                        title = "Income",
+                        goal = it.plannedIncome,
+                        actual = it.actualIncome,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    GoalVsActualCard(
+                        title = "Expenses",
+                        goal = it.plannedExpenses,
+                        actual = it.actualExpenses,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    GoalVsActualCard(
+                        title = "Net Savings",
+                        goal = it.plannedSavings,
+                        actual = it.actualSavings,
+                        color = if (it.actualSavings >= 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
             yearlyOverview?.let {
                 YearlySummarySection(overview = it)
             } ?: Text(
@@ -46,6 +85,13 @@ fun MonthlyOverviewChart(
 @Composable
 private fun YearlySummarySection(overview: YearlyOverview) {
     Column {
+        Text(
+            "This Year's Overview",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceAround

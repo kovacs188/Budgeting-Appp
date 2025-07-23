@@ -5,10 +5,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -32,8 +35,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -84,11 +85,12 @@ fun HomeScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
-            MonthNavigationTopBar(
+            // ** UPDATED: Custom header instead of TopAppBar **
+            LomlBudgetTopBar(
                 currentMonth = uiState.currentMonth,
                 onPreviousMonth = { viewModel.navigateToPreviousMonth() },
                 onNextMonth = { viewModel.navigateToNextMonth() },
-                onMonthNameClick = { viewModel.showMonthManagementDialog() } // Trigger dialog
+                onMonthNameClick = { viewModel.showMonthManagementDialog() }
             )
         },
         floatingActionButton = {
@@ -143,7 +145,7 @@ fun HomeScreen(
 
             item {
                 Text(
-                    text = "Yearly Overview",
+                    text = "Monthly & Yearly Overview",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold
                 )
@@ -152,7 +154,8 @@ fun HomeScreen(
             item {
                 MonthlyOverviewChart(
                     monthlyData = uiState.monthlyData,
-                    yearlyOverview = uiState.yearlyOverview
+                    yearlyOverview = uiState.yearlyOverview,
+                    monthlyOverview = uiState.monthlyOverview
                 )
             }
 
@@ -197,6 +200,76 @@ fun HomeScreen(
             }
         ) {
             DatePicker(state = datePickerState)
+        }
+    }
+}
+
+// ** REDESIGNED: LOML's Budget TopAppBar with proper sizing **
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LomlBudgetTopBar(
+    currentMonth: Month?,
+    onPreviousMonth: () -> Unit,
+    onNextMonth: () -> Unit,
+    onMonthNameClick: () -> Unit
+) {
+    // ** SOLUTION: Use a custom Card instead of TopAppBar to control height properly **
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.statusBars), // Handle status bar here
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(0.dp), // Square corners
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primary
+        )
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp) // Proper vertical padding for both lines
+        ) {
+            // ** LOML's Budget Title **
+            Text(
+                text = "LOML's Budget",
+                fontSize = 20.sp, // Slightly smaller to fit better
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimary
+            )
+
+            Spacer(modifier = Modifier.height(8.dp)) // Space between title and month
+
+            // ** Month Navigation Row **
+            Row(
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                IconButton(onClick = onPreviousMonth) {
+                    Icon(
+                        Icons.Default.KeyboardArrowLeft,
+                        contentDescription = "Previous Month",
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+                Text(
+                    text = currentMonth?.displayName ?: "Loading...",
+                    fontSize = 16.sp, // Smaller month text
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onMonthNameClick() }
+                )
+                IconButton(onClick = onNextMonth) {
+                    Icon(
+                        Icons.Default.KeyboardArrowRight,
+                        contentDescription = "Next Month",
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+            }
         }
     }
 }
@@ -258,45 +331,4 @@ private fun EmptyBudgetState(onAddCategoryClick: () -> Unit) {
             }
         }
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun MonthNavigationTopBar(
-    currentMonth: Month?,
-    onPreviousMonth: () -> Unit,
-    onNextMonth: () -> Unit,
-    onMonthNameClick: () -> Unit
-) {
-    TopAppBar(
-        title = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onPreviousMonth) {
-                    Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Previous Month")
-                }
-                Text(
-                    text = currentMonth?.displayName ?: "Loading...",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { onMonthNameClick() }
-                )
-                IconButton(onClick = onNextMonth) {
-                    Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Next Month")
-                }
-            }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.primary,
-            titleContentColor = MaterialTheme.colorScheme.onPrimary,
-            navigationIconContentColor = MaterialTheme.colorScheme.onPrimary,
-            actionIconContentColor = MaterialTheme.colorScheme.onPrimary
-        )
-    )
 }
