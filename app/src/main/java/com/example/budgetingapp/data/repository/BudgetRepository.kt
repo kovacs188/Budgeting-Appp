@@ -41,6 +41,9 @@ class BudgetRepository @Inject constructor(
     val transactionsFlow: Flow<List<Transaction>> = transactionDao.getAllActiveTransactions()
     val allCategoriesFlow: Flow<List<Category>> = categoryDao.getAllActiveCategories()
 
+    // New project flows
+    val activeProjectsFlow: Flow<List<Category>> = categoryDao.getActiveProjects()
+    val completedProjectsFlow: Flow<List<Category>> = categoryDao.getCompletedProjects()
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val currentMonthCategoriesFlow: Flow<List<Category>> = _currentMonthFlow.flatMapLatest { month ->
@@ -49,8 +52,17 @@ class BudgetRepository @Inject constructor(
         } else {
             categoryDao.getCategoriesForMonth(month.id).map { categories ->
                 categories.map { category ->
-                    val actualAmount = transactionDao.getTotalAmountForCategory(category.id) ?: 0.0
-                    category.copy(actualAmount = actualAmount)
+                    if (category.isProject) {
+                        // For projects, calculate total spent across all transactions
+                        val projectTotalSpent = calculateProjectTotalSpent(category.id)
+                        category.copy(
+                            projectTotalSpent = projectTotalSpent,
+                            actualAmount = transactionDao.getTotalAmountForCategory(category.id) ?: 0.0
+                        )
+                    } else {
+                        val actualAmount = transactionDao.getTotalAmountForCategory(category.id) ?: 0.0
+                        category.copy(actualAmount = actualAmount)
+                    }
                 }
             }
         }
@@ -59,12 +71,34 @@ class BudgetRepository @Inject constructor(
     init {
         repositoryScope.launch {
             ensureCurrentMonthExists()
+            // Update project totals periodically
+            updateAllProjectTotals()
         }
     }
 
     private suspend fun ensureCurrentMonthExists() {
         val now = LocalDate.now()
         getOrCreateMonth(now.year, now.monthValue)
+    }
+
+    private suspend fun calculateProjectTotalSpent(projectId: String): Double {
+        // Get all transactions for this project (including sub-projects)
+        val projectCategories = categoryDao.getProjectWithSubProjects(projectId)
+        val allProjectCategoryIds = projectCategories.map { it.id }
+
+        return if (allProjectCategoryIds.isNotEmpty()) {
+            transactionDao.getTransactionsForCategories(allProjectCategoryIds).sumOf { it.amount }
+        } else {
+            0.0
+        }
+    }
+
+    private suspend fun updateAllProjectTotals() {
+        val activeProjects = categoryDao.getActiveProjects().first()
+        activeProjects.forEach { project ->
+            val totalSpent = calculateProjectTotalSpent(project.id)
+            categoryDao.updateProjectTotalSpent(project.id, totalSpent)
+        }
     }
 
     suspend fun getOrCreateMonth(year: Int, monthValue: Int): Month {
@@ -92,6 +126,9 @@ class BudgetRepository @Inject constructor(
         val previousCategories = getCategoriesForMonth(previousMonth.id)
 
         previousCategories.forEach { oldCategory ->
+            // Don't rollover completed projects
+            if (oldCategory.isProject && oldCategory.isProjectComplete) return@forEach
+
             val newRolloverBalance = if (oldCategory.isRolloverEnabled) oldCategory.amountAvailable else 0.0
             val newCategory = oldCategory.copy(
                 id = Category.generateCategoryId(),
@@ -129,12 +166,23 @@ class BudgetRepository @Inject constructor(
     suspend fun createCategory(category: Category): Result<Unit> {
         return try {
             val currentMonth = _currentMonthFlow.value ?: return Result.failure(Exception("No active month found"))
-            // Get the highest current displayOrder and add 1
-            val maxOrder = categoryDao.getCategoriesForMonthOnce(currentMonth.id).maxOfOrNull { it.displayOrder } ?: -1
-            val categoryWithMonthId = category.copy(
-                monthId = currentMonth.id,
-                displayOrder = maxOrder + 1
-            )
+
+            val categoryWithMonthId = if (category.isProject) {
+                // Projects don't need month association and get special handling
+                val maxOrder = categoryDao.getCategoriesForMonthOnce(currentMonth.id).maxOfOrNull { it.displayOrder } ?: -1
+                category.copy(
+                    monthId = currentMonth.id, // Still associate with current month for now
+                    displayOrder = maxOrder + 1,
+                    type = CategoryType.PROJECT_EXPENSE
+                )
+            } else {
+                val maxOrder = categoryDao.getCategoriesForMonthOnce(currentMonth.id).maxOfOrNull { it.displayOrder } ?: -1
+                category.copy(
+                    monthId = currentMonth.id,
+                    displayOrder = maxOrder + 1
+                )
+            }
+
             categoryDao.insertCategory(categoryWithMonthId)
 
             if (categoryWithMonthId.type == CategoryType.FIXED_EXPENSE && categoryWithMonthId.targetAmount > 0) {
@@ -159,35 +207,42 @@ class BudgetRepository @Inject constructor(
 
             categoryDao.updateCategory(updatedCategory)
 
-            val autoTransactionDescription = "Automatic transaction for fixed expense"
-            val existingAutoTransaction = transactionDao.getTransactionsForCategoryOnce(updatedCategory.id)
-                .find { it.description == autoTransactionDescription }
+            // Handle fixed expense auto-transactions (existing logic)
+            if (!updatedCategory.isProject) {
+                val autoTransactionDescription = "Automatic transaction for fixed expense"
+                val existingAutoTransaction = transactionDao.getTransactionsForCategoryOnce(updatedCategory.id)
+                    .find { it.description == autoTransactionDescription }
 
-            val wasFixed = originalCategory.type == CategoryType.FIXED_EXPENSE
-            val isNowFixed = updatedCategory.type == CategoryType.FIXED_EXPENSE
+                val wasFixed = originalCategory.type == CategoryType.FIXED_EXPENSE
+                val isNowFixed = updatedCategory.type == CategoryType.FIXED_EXPENSE
 
-            if (isNowFixed) {
-                if (existingAutoTransaction != null) {
-                    if (existingAutoTransaction.amount != updatedCategory.targetAmount) {
-                        transactionDao.updateTransaction(
-                            existingAutoTransaction.copy(amount = updatedCategory.targetAmount)
+                if (isNowFixed) {
+                    if (existingAutoTransaction != null) {
+                        if (existingAutoTransaction.amount != updatedCategory.targetAmount) {
+                            transactionDao.updateTransaction(
+                                existingAutoTransaction.copy(amount = updatedCategory.targetAmount)
+                            )
+                        }
+                    } else {
+                        val currentMonth = _currentMonthFlow.value ?: return Result.failure(Exception("No active month"))
+                        val transaction = Transaction(
+                            categoryId = updatedCategory.id,
+                            amount = updatedCategory.targetAmount,
+                            description = autoTransactionDescription,
+                            date = LocalDate.of(currentMonth.year, currentMonth.month, 1)
                         )
+                        transactionDao.insertTransaction(transaction)
                     }
-                } else {
-                    val currentMonth = _currentMonthFlow.value ?: return Result.failure(Exception("No active month"))
-                    val transaction = Transaction(
-                        categoryId = updatedCategory.id,
-                        amount = updatedCategory.targetAmount,
-                        description = autoTransactionDescription,
-                        date = LocalDate.of(currentMonth.year, currentMonth.month, 1)
-                    )
-                    transactionDao.insertTransaction(transaction)
+                } else if (wasFixed && !isNowFixed) {
+                    existingAutoTransaction?.let {
+                        transactionDao.deleteTransaction(it.id)
+                    }
                 }
             }
-            else if (wasFixed && !isNowFixed) {
-                existingAutoTransaction?.let {
-                    transactionDao.deleteTransaction(it.id)
-                }
+
+            // Update project totals if this is a project
+            if (updatedCategory.isProject) {
+                updateAllProjectTotals()
             }
 
             Result.success(Unit)
@@ -197,7 +252,6 @@ class BudgetRepository @Inject constructor(
     }
 
     suspend fun updateCategoryOrder(categories: List<Category>) {
-        // Room runs suspend DAO functions in a transaction, so this loop is safe.
         categories.forEachIndexed { index, category ->
             categoryDao.updateCategory(category.copy(displayOrder = index))
         }
@@ -232,11 +286,62 @@ class BudgetRepository @Inject constructor(
         }
     }
 
+    // Project-specific methods
+    suspend fun createProject(
+        name: String,
+        description: String,
+        totalBudget: Double,
+        parentProjectId: String? = null
+    ): Result<Category> {
+        return try {
+            val currentMonth = _currentMonthFlow.value ?: return Result.failure(Exception("No active month found"))
+
+            val project = Category(
+                name = name,
+                type = CategoryType.PROJECT_EXPENSE,
+                targetAmount = 0.0, // Projects don't use monthly target
+                monthId = currentMonth.id,
+                description = description,
+                isProject = true,
+                projectTotalBudget = totalBudget,
+                parentProjectId = parentProjectId
+            )
+
+            categoryDao.insertCategory(project)
+            Result.success(project)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun markProjectComplete(projectId: String): Result<Unit> {
+        return try {
+            val completedDate = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+            categoryDao.markProjectComplete(projectId, completedDate)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getProjectWithSubProjects(projectId: String): List<Category> {
+        return categoryDao.getProjectWithSubProjects(projectId)
+    }
+
+    // Existing methods continue...
     suspend fun getCategoriesForMonth(monthId: String): List<Category> {
         val categories = categoryDao.getCategoriesForMonthOnce(monthId)
         return categories.map { category ->
-            val actualAmount = transactionDao.getTotalAmountForCategory(category.id) ?: 0.0
-            category.copy(actualAmount = actualAmount)
+            if (category.isProject) {
+                val projectTotalSpent = calculateProjectTotalSpent(category.id)
+                category.copy(
+                    projectTotalSpent = projectTotalSpent,
+                    actualAmount = transactionDao.getTotalAmountForCategory(category.id) ?: 0.0
+                )
+            } else {
+                val actualAmount = transactionDao.getTotalAmountForCategory(category.id) ?: 0.0
+                category.copy(actualAmount = actualAmount)
+            }
         }
     }
 
@@ -247,13 +352,28 @@ class BudgetRepository @Inject constructor(
 
     suspend fun getCategoryById(categoryId: String): Category? {
         val category = categoryDao.getCategoryById(categoryId)
-        return category?.copy(
-            actualAmount = transactionDao.getTotalAmountForCategory(categoryId) ?: 0.0
-        )
+        return if (category?.isProject == true) {
+            val projectTotalSpent = calculateProjectTotalSpent(category.id)
+            category.copy(
+                projectTotalSpent = projectTotalSpent,
+                actualAmount = transactionDao.getTotalAmountForCategory(categoryId) ?: 0.0
+            )
+        } else {
+            category?.copy(
+                actualAmount = transactionDao.getTotalAmountForCategory(categoryId) ?: 0.0
+            )
+        }
     }
 
     suspend fun createTransaction(transaction: Transaction): Result<Unit> = try {
         transactionDao.insertTransaction(transaction)
+
+        // Update project totals if this transaction is for a project
+        val category = categoryDao.getCategoryById(transaction.categoryId)
+        if (category?.isProject == true) {
+            updateAllProjectTotals()
+        }
+
         Result.success(Unit)
     } catch (e: Exception) {
         Result.failure(e)
@@ -261,13 +381,30 @@ class BudgetRepository @Inject constructor(
 
     suspend fun updateTransaction(transaction: Transaction): Result<Unit> = try {
         transactionDao.updateTransaction(transaction)
+
+        // Update project totals if this transaction is for a project
+        val category = categoryDao.getCategoryById(transaction.categoryId)
+        if (category?.isProject == true) {
+            updateAllProjectTotals()
+        }
+
         Result.success(Unit)
     } catch (e: Exception) {
         Result.failure(e)
     }
 
     suspend fun deleteTransaction(transactionId: String): Result<Unit> = try {
+        val transaction = transactionDao.getTransactionById(transactionId)
         transactionDao.deleteTransaction(transactionId)
+
+        // Update project totals if this transaction was for a project
+        if (transaction != null) {
+            val category = categoryDao.getCategoryById(transaction.categoryId)
+            if (category?.isProject == true) {
+                updateAllProjectTotals()
+            }
+        }
+
         Result.success(Unit)
     } catch (e: Exception) {
         Result.failure(e)

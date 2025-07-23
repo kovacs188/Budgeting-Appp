@@ -44,17 +44,6 @@ class CategoryTypeDetailsViewModel @Inject constructor(
         }
     }
 
-    fun onCategoryMove(from: Int, to: Int) {
-        viewModelScope.launch {
-            val currentList = _uiState.value.categories.toMutableList()
-            currentList.add(to, currentList.removeAt(from))
-            // Update UI state immediately for responsiveness
-            _uiState.value = _uiState.value.copy(categories = currentList)
-            // Persist the new order in the database
-            repository.updateCategoryOrder(currentList)
-        }
-    }
-
     fun refreshCategories(categoryType: CategoryType) {
         loadCategories(categoryType)
     }

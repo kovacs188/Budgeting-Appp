@@ -1,5 +1,6 @@
 package com.example.budgetingapp.ui.screens
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -13,11 +14,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -42,6 +44,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,21 +55,35 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.budgetingapp.data.model.CategoryType
 import com.example.budgetingapp.data.model.Month
+import com.example.budgetingapp.ui.components.DraggableSimpleCategorySummaryCard
 import com.example.budgetingapp.ui.components.MonthlyOverviewChart
+import com.example.budgetingapp.ui.components.ProjectSummaryCard
 import com.example.budgetingapp.ui.components.QuickTransactionEntry
-import com.example.budgetingapp.ui.components.SimpleCategorySummaryCard
+import com.example.budgetingapp.ui.components.SummaryCardDragDropState
 import java.time.LocalDate
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     onNavigateToCategoryTypeDetails: (CategoryType) -> Unit,
     onNavigateToCategoryCreator: () -> Unit,
+    onNavigateToProjects: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showDatePicker by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Drag and drop setup
+    val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+    val dragDropState = remember(listState, scope) {
+        SummaryCardDragDropState(
+            listState = listState,
+            onMove = { from, to -> viewModel.onSummaryCardMove(from, to) },
+            scope = scope
+        )
+    }
 
     LaunchedEffect(uiState.errorMessage) {
         uiState.errorMessage?.let {
@@ -85,7 +102,6 @@ fun HomeScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
-            // ** UPDATED: Custom header instead of TopAppBar **
             LomlBudgetTopBar(
                 currentMonth = uiState.currentMonth,
                 onPreviousMonth = { viewModel.navigateToPreviousMonth() },
@@ -100,11 +116,13 @@ fun HomeScreen(
         }
     ) { paddingValues ->
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            userScrollEnabled = !dragDropState.isDragging
         ) {
             item { Spacer(Modifier.height(0.dp)) }
 
@@ -135,10 +153,26 @@ fun HomeScreen(
                     EmptyBudgetState(onAddCategoryClick = onNavigateToCategoryCreator)
                 }
             } else {
-                items(uiState.categorySummaries) { summary ->
-                    SimpleCategorySummaryCard(
+                itemsIndexed(
+                    uiState.categorySummaries.filter { it.categories.isNotEmpty() },
+                    key = { _, summary -> summary.type }
+                ) { index, summary ->
+                    DraggableSimpleCategorySummaryCard(
                         summary = summary,
-                        onClick = onNavigateToCategoryTypeDetails
+                        dragDropState = dragDropState,
+                        index = index,
+                        onClick = onNavigateToCategoryTypeDetails,
+                        modifier = Modifier.animateItemPlacement()
+                    )
+                }
+            }
+
+            // Projects section
+            if (uiState.activeProjects.isNotEmpty()) {
+                item {
+                    ProjectSummaryCard(
+                        activeProjects = uiState.activeProjects,
+                        onClick = onNavigateToProjects
                     )
                 }
             }
@@ -204,7 +238,6 @@ fun HomeScreen(
     }
 }
 
-// ** REDESIGNED: LOML's Budget TopAppBar with proper sizing **
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LomlBudgetTopBar(
@@ -213,12 +246,11 @@ private fun LomlBudgetTopBar(
     onNextMonth: () -> Unit,
     onMonthNameClick: () -> Unit
 ) {
-    // ** SOLUTION: Use a custom Card instead of TopAppBar to control height properly **
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .windowInsetsPadding(WindowInsets.statusBars), // Handle status bar here
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(0.dp), // Square corners
+            .windowInsetsPadding(WindowInsets.statusBars),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(0.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primary
         )
@@ -227,19 +259,17 @@ private fun LomlBudgetTopBar(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 16.dp) // Proper vertical padding for both lines
+                .padding(vertical = 16.dp)
         ) {
-            // ** LOML's Budget Title **
             Text(
                 text = "LOML's Budget",
-                fontSize = 20.sp, // Slightly smaller to fit better
+                fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onPrimary
             )
 
-            Spacer(modifier = Modifier.height(8.dp)) // Space between title and month
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // ** Month Navigation Row **
             Row(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
@@ -247,14 +277,14 @@ private fun LomlBudgetTopBar(
             ) {
                 IconButton(onClick = onPreviousMonth) {
                     Icon(
-                        Icons.Default.KeyboardArrowLeft,
+                        Icons.AutoMirrored.Filled.KeyboardArrowLeft,
                         contentDescription = "Previous Month",
                         tint = MaterialTheme.colorScheme.onPrimary
                     )
                 }
                 Text(
                     text = currentMonth?.displayName ?: "Loading...",
-                    fontSize = 16.sp, // Smaller month text
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onPrimary,
@@ -264,7 +294,7 @@ private fun LomlBudgetTopBar(
                 )
                 IconButton(onClick = onNextMonth) {
                     Icon(
-                        Icons.Default.KeyboardArrowRight,
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
                         contentDescription = "Next Month",
                         tint = MaterialTheme.colorScheme.onPrimary
                     )

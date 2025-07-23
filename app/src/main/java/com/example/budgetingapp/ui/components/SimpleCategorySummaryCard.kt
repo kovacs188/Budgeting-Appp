@@ -104,5 +104,6 @@ private fun getCategoryTypeDisplayName(type: CategoryType): String {
         CategoryType.FIXED_EXPENSE -> "Fixed Expenses"
         CategoryType.VARIABLE_EXPENSE -> "Variable Expenses"
         CategoryType.DISCRETIONARY_EXPENSE -> "Discretionary Expenses"
+        CategoryType.PROJECT_EXPENSE -> "Projects"
     }
 }

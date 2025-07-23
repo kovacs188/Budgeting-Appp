@@ -48,7 +48,6 @@ data class YearlyOverview(
     val actualSavings: Double get() = actualIncome - actualExpenses
 }
 
-// ** SIMPLE: Monthly Overview (same pattern as yearly) **
 data class MonthlyOverview(
     val plannedIncome: Double,
     val actualIncome: Double,
@@ -69,7 +68,8 @@ data class HomeUiState(
     val categorySummaries: List<CategorySummary> = emptyList(),
     val monthlyData: List<MonthlyData> = emptyList(),
     val yearlyOverview: YearlyOverview? = null,
-    val monthlyOverview: MonthlyOverview? = null, // ** SIMPLE: Added monthly overview **
+    val monthlyOverview: MonthlyOverview? = null,
+    val activeProjects: List<Category> = emptyList(), // ** NEW: Active projects **
     val transactionSubmitted: Boolean = false,
     val errorMessage: String? = null,
     val currentMonth: Month? = null,
@@ -90,9 +90,10 @@ class HomeViewModel @Inject constructor(
                 repository.currentMonthFlow,
                 repository.allMonthsFlow,
                 repository.allCategoriesFlow,
-                repository.transactionsFlow
-            ) { currentMonth, allMonths, allCategories, allTransactions ->
-                updateAllData(currentMonth, allMonths, allCategories, allTransactions)
+                repository.transactionsFlow,
+                repository.activeProjectsFlow // ** NEW: Include active projects **
+            ) { currentMonth, allMonths, allCategories, allTransactions, activeProjects ->
+                updateAllData(currentMonth, allMonths, allCategories, allTransactions, activeProjects)
             }.collect {}
         }
     }
@@ -101,21 +102,18 @@ class HomeViewModel @Inject constructor(
         currentMonth: Month?,
         allMonths: List<Month>,
         allCategories: List<Category>,
-        allTransactions: List<Transaction>
+        allTransactions: List<Transaction>,
+        activeProjects: List<Category> // ** NEW: Active projects parameter **
     ) {
-        // Create a definitive map of transactions grouped by their category.
         val transactionsByCategoryId = allTransactions.groupBy { it.categoryId }
 
-        // Create a definitive list of all categories, with their actual amounts correctly calculated from the map above.
         val allCategoriesWithActuals = allCategories.map { category ->
             val actualAmount = transactionsByCategoryId[category.id]?.sumOf { it.amount } ?: 0.0
             category.copy(actualAmount = actualAmount)
         }
 
-        // Group these definitive categories by month ID. This is our single source of truth.
         val categoriesByMonthId = allCategoriesWithActuals.groupBy { it.monthId }
 
-        // --- Current Month Calculation ---
         val currentCategories = categoriesByMonthId[currentMonth?.id] ?: emptyList()
         val summaries = CategoryType.values().map { type ->
             val typeCategories = currentCategories.filter { it.type == type }
@@ -128,13 +126,10 @@ class HomeViewModel @Inject constructor(
             )
         }
 
-        // --- FIXED: Yearly and Monthly Calculation ---
         val activeMonthIds = allMonths.map { it.id }.toSet()
         val filteredCategoriesByMonthId = categoriesByMonthId.filterKeys { it in activeMonthIds }
 
         val yearlyOverview = calculateYearlyOverview(allMonths, filteredCategoriesByMonthId)
-
-        // ** SIMPLE: Calculate Monthly Overview (just like yearly but for current month only) **
         val monthlyOverview = calculateMonthlyOverview(currentMonth, filteredCategoriesByMonthId)
 
         val monthlyData = allMonths.take(12).map { month ->
@@ -149,24 +144,22 @@ class HomeViewModel @Inject constructor(
             )
         }.reversed()
 
-        // --- Quick Entry Calculation ---
         val currentSelectedType = _uiState.value.selectedCategoryType
         val available = currentCategories.filter { it.type == currentSelectedType }
 
-        // --- Final State Update ---
         _uiState.value = _uiState.value.copy(
             isLoading = false,
             currentMonth = currentMonth,
             categorySummaries = summaries,
             monthlyData = monthlyData,
             yearlyOverview = yearlyOverview,
-            monthlyOverview = monthlyOverview, // ** SIMPLE: Add monthly overview **
+            monthlyOverview = monthlyOverview,
+            activeProjects = activeProjects, // ** NEW: Include active projects **
             availableCategories = available,
             selectedCategory = _uiState.value.selectedCategory?.let { current -> available.find { it.id == current.id } } ?: available.firstOrNull()
         )
     }
 
-    // ** SIMPLE: Calculate Monthly Overview (same pattern as yearly) **
     private fun calculateMonthlyOverview(
         currentMonth: Month?,
         categoriesByMonthId: Map<String, List<Category>>
@@ -330,5 +323,15 @@ class HomeViewModel @Inject constructor(
 
     fun transactionHandled() {
         _uiState.value = _uiState.value.copy(transactionSubmitted = false, errorMessage = null)
+    }
+
+    // ** THIS IS THE NEW FUNCTION FOR DRAG-AND-DROP **
+    fun onSummaryCardMove(from: Int, to: Int) {
+        val currentSummaries = _uiState.value.categorySummaries.toMutableList()
+        if (from < currentSummaries.size && to < currentSummaries.size) {
+            currentSummaries.add(to, currentSummaries.removeAt(from))
+            _uiState.value = _uiState.value.copy(categorySummaries = currentSummaries)
+            // Note: You might want to persist this order preference in DataStore or similar
+        }
     }
 }

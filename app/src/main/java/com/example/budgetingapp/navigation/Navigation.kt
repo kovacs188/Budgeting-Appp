@@ -8,11 +8,13 @@ import com.example.budgetingapp.data.model.CategoryType
 import com.example.budgetingapp.ui.screens.CategoryCreationScreen
 import com.example.budgetingapp.ui.screens.CategoryTypeDetailsScreen
 import com.example.budgetingapp.ui.screens.HomeScreen
+import com.example.budgetingapp.ui.screens.ProjectsScreen
 import com.example.budgetingapp.ui.screens.TransactionHistoryScreen
 
 sealed class Screen(val route: String) {
     object Home : Screen("home")
     object CategoryCreator : Screen("category_creator")
+    object Projects : Screen("projects")
     object TransactionHistory : Screen("transaction_history/{categoryId}") {
         fun createRoute(categoryId: String) = "transaction_history/$categoryId"
     }
@@ -36,6 +38,23 @@ fun BudgetNavGraph(
                 },
                 onNavigateToCategoryCreator = {
                     navController.navigate(Screen.CategoryCreator.route)
+                },
+                onNavigateToProjects = {
+                    navController.navigate(Screen.Projects.route)
+                }
+            )
+        }
+
+        composable(Screen.Projects.route) {
+            ProjectsScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
+                onNavigateToCreateProject = {
+                    navController.navigate(Screen.CategoryCreator.route + "?isProject=true")
+                },
+                onNavigateToProjectDetails = { projectId ->
+                    navController.navigate(Screen.TransactionHistory.createRoute(projectId))
                 }
             )
         }
@@ -53,14 +72,14 @@ fun BudgetNavGraph(
             )
         }
 
-        // ** THE FIX IS HERE **
-        // The route now accepts an optional categoryType parameter
-        composable(Screen.CategoryCreator.route + "?categoryId={categoryId}&categoryType={categoryType}") { backStackEntry ->
+        composable(Screen.CategoryCreator.route + "?categoryId={categoryId}&categoryType={categoryType}&isProject={isProject}") { backStackEntry ->
             val categoryId = backStackEntry.arguments?.getString("categoryId")
             val categoryType = backStackEntry.arguments?.getString("categoryType")
+            val isProject = backStackEntry.arguments?.getString("isProject") == "true"
             CategoryCreationScreen(
                 categoryId = categoryId,
-                defaultCategoryType = categoryType, // Pass it to the screen
+                defaultCategoryType = categoryType,
+                isProject = isProject,
                 onNavigateBack = {
                     navController.popBackStack()
                 },
@@ -82,7 +101,6 @@ fun BudgetNavGraph(
                     navController.navigate(Screen.TransactionHistory.createRoute(categoryId))
                 },
                 onNavigateToCategoryCreator = {
-                    // Pass the current category type when navigating
                     navController.navigate(Screen.CategoryCreator.route + "?categoryType=${categoryType.name}")
                 }
             )

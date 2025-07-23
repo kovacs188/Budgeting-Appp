@@ -30,7 +30,7 @@ class CategoryViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(CategoryUiState())
     val uiState: StateFlow<CategoryUiState> = _uiState.asStateFlow()
 
-    fun initialize(categoryId: String?, defaultCategoryType: String?) {
+    fun initialize(categoryId: String?, defaultCategoryType: String?, isProject: Boolean = false) {
         if (categoryId != null) {
             // Editing an existing category
             viewModelScope.launch {
@@ -44,7 +44,7 @@ class CategoryViewModel @Inject constructor(
             }
         } else {
             // Creating a new category
-            initializeForCreate(defaultCategoryType)
+            initializeForCreate(defaultCategoryType, isProject)
         }
     }
 
@@ -54,7 +54,10 @@ class CategoryViewModel @Inject constructor(
             type = category.type,
             targetAmount = category.targetAmount.toString(),
             description = category.description,
-            isRolloverEnabled = category.isRolloverEnabled
+            isRolloverEnabled = category.isRolloverEnabled,
+            isProject = category.isProject,
+            projectTotalBudget = if (category.isProject) category.projectTotalBudget.toString() else "",
+            parentProjectId = category.parentProjectId
         ).validate()
 
         _uiState.value = _uiState.value.copy(
@@ -65,15 +68,18 @@ class CategoryViewModel @Inject constructor(
         )
     }
 
-    private fun initializeForCreate(defaultCategoryType: String?) {
-        // ** THE FIX IS HERE **
-        // It now defaults to INCOME when no specific type is provided.
+    private fun initializeForCreate(defaultCategoryType: String?, isProject: Boolean = false) {
         val defaultType = try {
             defaultCategoryType?.let { CategoryType.valueOf(it) } ?: CategoryType.INCOME
         } catch (e: IllegalArgumentException) {
             CategoryType.INCOME
         }
-        _uiState.value = CategoryUiState(formState = CategoryFormState(type = defaultType))
+        _uiState.value = CategoryUiState(
+            formState = CategoryFormState(
+                type = if (isProject) CategoryType.PROJECT_EXPENSE else defaultType,
+                isProject = isProject
+            )
+        )
     }
 
     fun updateName(name: String) {
@@ -82,7 +88,7 @@ class CategoryViewModel @Inject constructor(
         )
     }
 
-    fun updateType(type: com.example.budgetingapp.data.model.CategoryType) {
+    fun updateType(type: CategoryType) {
         _uiState.value = _uiState.value.copy(
             formState = _uiState.value.formState.copy(type = type).validate()
         )
@@ -103,6 +109,22 @@ class CategoryViewModel @Inject constructor(
     fun updateIsRolloverEnabled(isEnabled: Boolean) {
         _uiState.value = _uiState.value.copy(
             formState = _uiState.value.formState.copy(isRolloverEnabled = isEnabled).validate()
+        )
+    }
+
+    // New project-specific methods
+    fun updateIsProject(isProject: Boolean) {
+        _uiState.value = _uiState.value.copy(
+            formState = _uiState.value.formState.copy(
+                isProject = isProject,
+                type = if (isProject) CategoryType.PROJECT_EXPENSE else CategoryType.DISCRETIONARY_EXPENSE
+            ).validate()
+        )
+    }
+
+    fun updateProjectTotalBudget(budget: String) {
+        _uiState.value = _uiState.value.copy(
+            formState = _uiState.value.formState.copy(projectTotalBudget = budget).validate()
         )
     }
 
@@ -131,26 +153,73 @@ class CategoryViewModel @Inject constructor(
     }
 
     private suspend fun createCategory(formState: CategoryFormState): Result<Unit> {
-        val category = Category(
-            name = formState.name.trim(),
-            type = formState.type,
-            targetAmount = formState.targetAmount.toDouble(),
-            description = formState.description.trim(),
-            isRolloverEnabled = formState.isRolloverEnabled,
-            monthId = ""
-        )
-        return repository.createCategory(category)
+        return if (formState.isProject) {
+            // Create as project
+            val result = repository.createProject(
+                name = formState.name.trim(),
+                description = formState.description.trim(),
+                totalBudget = formState.projectTotalBudget.toDouble(),
+                parentProjectId = formState.parentProjectId
+            )
+            if (result.isSuccess) {
+                // If there's a monthly allocation, create a regular category linked to this project
+                if (formState.targetAmount.isNotBlank() && formState.targetAmount.toDoubleOrNull() != null && formState.targetAmount.toDouble() > 0) {
+                    val project = result.getOrNull()!!
+                    val monthlyCategory = Category(
+                        name = "${formState.name.trim()} (Monthly)",
+                        type = CategoryType.DISCRETIONARY_EXPENSE,
+                        targetAmount = formState.targetAmount.toDouble(),
+                        description = "Monthly allocation for ${formState.name.trim()} project",
+                        parentProjectId = project.id,
+                        monthId = ""
+                    )
+                    repository.createCategory(monthlyCategory)
+                }
+                Result.success(Unit)
+            } else {
+                result.map { }
+            }
+        } else {
+            // Create as regular category
+            val category = Category(
+                name = formState.name.trim(),
+                type = formState.type,
+                targetAmount = formState.targetAmount.toDouble(),
+                description = formState.description.trim(),
+                isRolloverEnabled = formState.isRolloverEnabled,
+                monthId = ""
+            )
+            repository.createCategory(category)
+        }
     }
 
     private suspend fun updateCategory(formState: CategoryFormState): Result<Unit> {
         val originalCategory = _uiState.value.originalCategory ?: return Result.failure(Exception("Original category not found"))
-        val updatedCategory = originalCategory.copy(
-            name = formState.name.trim(),
-            type = formState.type,
-            targetAmount = formState.targetAmount.toDouble(),
-            description = formState.description.trim(),
-            isRolloverEnabled = formState.isRolloverEnabled
-        )
+
+        val updatedCategory = if (formState.isProject) {
+            originalCategory.copy(
+                name = formState.name.trim(),
+                type = CategoryType.PROJECT_EXPENSE,
+                targetAmount = if (formState.targetAmount.isNotBlank()) formState.targetAmount.toDouble() else 0.0,
+                description = formState.description.trim(),
+                isProject = true,
+                projectTotalBudget = formState.projectTotalBudget.toDouble(),
+                parentProjectId = formState.parentProjectId
+            )
+        } else {
+            originalCategory.copy(
+                name = formState.name.trim(),
+                type = formState.type,
+                targetAmount = formState.targetAmount.toDouble(),
+                description = formState.description.trim(),
+                isRolloverEnabled = formState.isRolloverEnabled,
+                isProject = false,
+                projectTotalBudget = 0.0,
+                projectTotalSpent = 0.0,
+                parentProjectId = null
+            )
+        }
+
         return repository.updateCategory(updatedCategory)
     }
 
