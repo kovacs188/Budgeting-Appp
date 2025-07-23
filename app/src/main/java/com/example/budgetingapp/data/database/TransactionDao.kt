@@ -1,8 +1,12 @@
 package com.example.budgetingapp.data.database
 
-import androidx.room.*
-import kotlinx.coroutines.flow.Flow
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+import androidx.room.Update
 import com.example.budgetingapp.data.model.Transaction
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface TransactionDao {
@@ -12,6 +16,11 @@ interface TransactionDao {
 
     @Query("SELECT * FROM transactions WHERE categoryId = :categoryId AND isActive = 1 ORDER BY date DESC")
     fun getTransactionsForCategory(categoryId: String): Flow<List<Transaction>>
+
+    // ** THE FIX IS HERE **
+    // New function to get a one-time list of transactions, needed for the update logic.
+    @Query("SELECT * FROM transactions WHERE categoryId = :categoryId AND isActive = 1")
+    suspend fun getTransactionsForCategoryOnce(categoryId: String): List<Transaction>
 
     @Query("SELECT * FROM transactions WHERE categoryId IN (:categoryIds) AND isActive = 1 ORDER BY date DESC")
     suspend fun getTransactionsForCategories(categoryIds: List<String>): List<Transaction>

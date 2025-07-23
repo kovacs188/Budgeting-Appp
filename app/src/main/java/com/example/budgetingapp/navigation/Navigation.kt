@@ -31,15 +31,14 @@ fun BudgetNavGraph(
     ) {
         composable(Screen.Home.route) {
             HomeScreen(
-                // Explicitly type the lambda parameter to help the compiler
                 onNavigateToCategoryTypeDetails = { categoryType: CategoryType ->
                     navController.navigate(Screen.CategoryTypeDetails.createRoute(categoryType))
+                },
+                onNavigateToCategoryCreator = {
+                    navController.navigate(Screen.CategoryCreator.route)
                 }
             )
         }
-
-        // Removed MonthScreen and MonthsListScreen composables
-        // as per your plan for consolidation.
 
         composable(Screen.TransactionHistory.route) { backStackEntry ->
             val categoryId = backStackEntry.arguments?.getString("categoryId") ?: ""
@@ -48,20 +47,24 @@ fun BudgetNavGraph(
                 onNavigateBack = {
                     navController.popBackStack()
                 },
-                onNavigateToEditCategory = { categoryId ->
-                    // For now, just navigate to the category creator
-                    // We'll pass the category through the viewModel
-                    navController.navigate(Screen.CategoryCreator.route)
+                onNavigateToEditCategory = { catId ->
+                    navController.navigate(Screen.CategoryCreator.route + "?categoryId=$catId")
                 }
             )
         }
 
-        composable(Screen.CategoryCreator.route) {
+        // ** THE FIX IS HERE **
+        // The route now accepts an optional categoryType parameter
+        composable(Screen.CategoryCreator.route + "?categoryId={categoryId}&categoryType={categoryType}") { backStackEntry ->
+            val categoryId = backStackEntry.arguments?.getString("categoryId")
+            val categoryType = backStackEntry.arguments?.getString("categoryType")
             CategoryCreationScreen(
+                categoryId = categoryId,
+                defaultCategoryType = categoryType, // Pass it to the screen
                 onNavigateBack = {
                     navController.popBackStack()
                 },
-                onCategoryCreated = {
+                onCategorySaved = {
                     navController.popBackStack()
                 }
             )
@@ -79,7 +82,8 @@ fun BudgetNavGraph(
                     navController.navigate(Screen.TransactionHistory.createRoute(categoryId))
                 },
                 onNavigateToCategoryCreator = {
-                    navController.navigate(Screen.CategoryCreator.route)
+                    // Pass the current category type when navigating
+                    navController.navigate(Screen.CategoryCreator.route + "?categoryType=${categoryType.name}")
                 }
             )
         }

@@ -24,7 +24,6 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -42,10 +41,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.budgetingapp.data.model.CategoryType
 import com.example.budgetingapp.data.model.Transaction
+import com.example.budgetingapp.ui.components.CategoryCard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,7 +59,6 @@ fun TransactionHistoryScreen(
     var showAddTransactionDialog by remember { mutableStateOf(false) }
     var showDeleteCategoryDialog by remember { mutableStateOf(false) }
 
-    // Load transactions when screen opens
     LaunchedEffect(categoryId) {
         viewModel.loadTransactions(categoryId)
     }
@@ -69,344 +66,173 @@ fun TransactionHistoryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = uiState.category?.name ?: "Transaction History",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        uiState.category?.let { category ->
-                            Text(
-                                text = "${category.displayType} • $${String.format("%.2f", category.targetAmount)} budgeted",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                },
+                title = { Text(uiState.category?.name ?: "History") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowBack,
-                            contentDescription = "Back to Month"
-                        )
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 },
+                // ** THE FIX IS HERE **
+                // Actions have been removed from the top app bar
+                actions = {},
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
+                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary,
+                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary
                 )
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showAddTransactionDialog = true },
-                containerColor = MaterialTheme.colorScheme.primary
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Add Transaction"
-                )
+            FloatingActionButton(onClick = { showAddTransactionDialog = true }) {
+                Icon(Icons.Default.Add, contentDescription = "Add Transaction")
             }
         }
     ) { paddingValues ->
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Category Summary Card
-            uiState.category?.let { category ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column {
-                                Text(
-                                    text = "Budgeted",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = "$${String.format("%.2f", category.targetAmount)}",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Column {
-                                Text(
-                                    text = if (category.type == CategoryType.INCOME) "Earned" else "Spent",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = "$${String.format("%.2f", category.actualAmount)}",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (category.isOverBudget && category.type != CategoryType.INCOME)
-                                        MaterialTheme.colorScheme.error
-                                    else
-                                        MaterialTheme.colorScheme.primary
-                                )
-                            }
-                            Column {
-                                Text(
-                                    text = if (category.type == CategoryType.INCOME) "Needed" else "Remaining",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = "$${String.format("%.2f", kotlin.math.abs(category.remainingAmount))}",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (category.type == CategoryType.INCOME) {
-                                        if (category.actualAmount >= category.targetAmount)
-                                            MaterialTheme.colorScheme.primary
-                                        else
-                                            MaterialTheme.colorScheme.error
-                                    } else {
-                                        if (category.actualAmount <= category.targetAmount)
-                                            MaterialTheme.colorScheme.primary
-                                        else
-                                            MaterialTheme.colorScheme.error
-                                    }
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // Edit and Delete buttons
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = { onNavigateToEditCategory(category.id) },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Edit Category")
-                            }
-
-                            OutlinedButton(
-                                onClick = { showDeleteCategoryDialog = true },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = MaterialTheme.colorScheme.error
-                                )
-                            ) {
-                                Text("Delete Category")
-                            }
-                        }
-                    }
+            // Updated Summary Card
+            item {
+                uiState.category?.let { category ->
+                    // ** THE FIX IS HERE **
+                    // We now pass the new parameters to the CategoryCard
+                    CategoryCard(
+                        category = category,
+                        isOnHistoryScreen = true,
+                        onEditCategory = { onNavigateToEditCategory(category.id) },
+                        onDeleteCategory = { showDeleteCategoryDialog = true },
+                        onQuickAddTransaction = { showAddTransactionDialog = true },
+                        onViewTransactions = { /* Not used on this screen */ }
+                    )
                 }
             }
 
             // Transactions List
             if (uiState.transactions.isEmpty()) {
-                // Empty State
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
+                item {
                     Text(
-                        text = "No Transactions Yet",
-                        style = MaterialTheme.typography.headlineSmall,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Tap the + button to add your first transaction",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        "No transactions yet. Tap '+' to add one.",
+                        modifier = Modifier.padding(32.dp),
                         textAlign = TextAlign.Center
                     )
                 }
             } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(uiState.transactions) { transaction ->
-                        TransactionCard(
-                            transaction = transaction,
-                            onEditClick = { selectedTransactionToEdit = transaction },
-                            onDeleteClick = { selectedTransactionToDelete = transaction }
-                        )
-                    }
-
-                    // Add some space at the bottom for FAB
-                    item {
-                        Spacer(modifier = Modifier.height(80.dp))
-                    }
+                items(uiState.transactions) { transaction ->
+                    TransactionListItem(
+                        transaction = transaction,
+                        onEditClick = { selectedTransactionToEdit = transaction },
+                        onDeleteClick = { selectedTransactionToDelete = transaction }
+                    )
                 }
             }
+
+            item { Spacer(Modifier.height(80.dp)) } // Space for FAB
         }
     }
 
-    // Delete Category Confirmation Dialog
-    if (showDeleteCategoryDialog) {
-        uiState.category?.let { category ->
-            AlertDialog(
-                onDismissRequest = { showDeleteCategoryDialog = false },
-                title = { Text("Delete Category") },
-                text = {
-                    Text(buildString {
-                        append("Are you sure you want to delete \"${category.name}\"?")
-                        if (uiState.transactions.isNotEmpty()) {
-                            append("\n\nThis will also delete ${uiState.transactions.size} transaction(s) totaling $${String.format("%.2f", uiState.transactions.sumOf { it.amount })}.")
-                        }
-                    })
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            viewModel.deleteCategory(category.id)
-                            showDeleteCategoryDialog = false
-                            onNavigateBack() // Navigate back since category is deleted
-                        }
-                    ) {
-                        Text("Delete", color = MaterialTheme.colorScheme.error)
-                    }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = { showDeleteCategoryDialog = false }
-                    ) {
-                        Text("Cancel")
-                    }
-                }
-            )
-        }
-    }
-
-    // Add Transaction Dialog
+    // Dialogs
     if (showAddTransactionDialog) {
-        uiState.category?.let { category ->
+        uiState.category?.let {
             TransactionEntryDialog(
-                category = category,
+                category = it,
                 onDismiss = { showAddTransactionDialog = false },
-                onTransactionAdded = {
-                    showAddTransactionDialog = false
-                    viewModel.refreshTransactions()
-                }
+                onTransactionAdded = { viewModel.refreshTransactions() }
             )
         }
     }
 
-    // Edit Transaction Dialog
-    if (selectedTransactionToEdit != null) {
+    selectedTransactionToEdit?.let { transaction ->
         uiState.category?.let { category ->
             TransactionEntryDialog(
                 category = category,
-                existingTransaction = selectedTransactionToEdit,
+                existingTransaction = transaction,
                 onDismiss = { selectedTransactionToEdit = null },
-                onTransactionAdded = {
-                    selectedTransactionToEdit = null
-                    viewModel.refreshTransactions()
-                }
+                onTransactionAdded = { viewModel.refreshTransactions() }
             )
         }
     }
 
-    // Delete Confirmation Dialog
     selectedTransactionToDelete?.let { transaction ->
-        AlertDialog(
-            onDismissRequest = { selectedTransactionToDelete = null },
-            title = { Text("Delete Transaction") },
-            text = {
-                Text("Are you sure you want to delete this $${String.format("%.2f", transaction.amount)} transaction?")
+        DeleteConfirmationDialog(
+            title = "Delete Transaction",
+            text = "Are you sure you want to delete this $${String.format("%,.2f", transaction.amount)} transaction?",
+            onConfirm = {
+                viewModel.deleteTransaction(transaction.id)
+                selectedTransactionToDelete = null
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.deleteTransaction(transaction.id)
-                        selectedTransactionToDelete = null
-                    }
-                ) {
-                    Text("Delete")
-                }
+            onDismiss = { selectedTransactionToDelete = null }
+        )
+    }
+
+    if (showDeleteCategoryDialog) {
+        DeleteConfirmationDialog(
+            title = "Delete Category",
+            text = "Are you sure? This will delete the category and all its transactions.",
+            onConfirm = {
+                uiState.category?.let { viewModel.deleteCategory(it.id) }
+                showDeleteCategoryDialog = false
+                onNavigateBack()
             },
-            dismissButton = {
-                TextButton(
-                    onClick = { selectedTransactionToDelete = null }
-                ) {
-                    Text("Cancel")
-                }
-            }
+            onDismiss = { showDeleteCategoryDialog = false }
         )
     }
 }
 
 @Composable
-private fun TransactionCard(
+private fun TransactionListItem(
     transaction: Transaction,
     onEditClick: () -> Unit,
     onDeleteClick: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
+    Card(elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "${String.format("%.2f", transaction.amount)}",
+                    text = "$${String.format("%,.2f", transaction.amount)}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
                 if (transaction.description.isNotEmpty()) {
-                    Text(
-                        text = transaction.description,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text(text = transaction.description, style = MaterialTheme.typography.bodyMedium)
                 }
-                Text(
-                    text = transaction.displayDate,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text(text = transaction.displayDate, style = MaterialTheme.typography.bodySmall)
             }
-
             Row {
-                IconButton(onClick = onEditClick) {
-                    Icon(
-                        imageVector = Icons.Default.Edit,
-                        contentDescription = "Edit Transaction",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-
-                IconButton(onClick = onDeleteClick) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Delete Transaction",
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                }
+                IconButton(onClick = onEditClick) { Icon(Icons.Default.Edit, "Edit") }
+                IconButton(onClick = onDeleteClick) { Icon(Icons.Default.Delete, "Delete") }
             }
         }
     }
+}
+
+@Composable
+private fun DeleteConfirmationDialog(
+    title: String,
+    text: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(text) },
+        confirmButton = {
+            TextButton(onClick = onConfirm, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
+                Text("Delete")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }

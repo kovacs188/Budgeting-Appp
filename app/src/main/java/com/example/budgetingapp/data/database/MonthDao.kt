@@ -1,8 +1,12 @@
 package com.example.budgetingapp.data.database
 
-import androidx.room.*
-import kotlinx.coroutines.flow.Flow
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+import androidx.room.Update
 import com.example.budgetingapp.data.model.Month
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface MonthDao {
@@ -22,7 +26,9 @@ interface MonthDao {
     @Update
     suspend fun updateMonth(month: Month)
 
-    @Query("UPDATE months SET isActive = 0 WHERE id = :monthId")
+    // ** THE FIX IS HERE **
+    // This now performs a hard delete, which is better for testing purposes.
+    @Query("DELETE FROM months WHERE id = :monthId")
     suspend fun deleteMonth(monthId: String)
 
     @Query("DELETE FROM months")

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,17 +24,20 @@ import com.example.budgetingapp.ui.screens.CategorySummary
 @Composable
 fun SimpleCategorySummaryCard(
     summary: CategorySummary,
-    onClick: (CategoryType) -> Unit // New parameter for click handling
+    onClick: (CategoryType) -> Unit
 ) {
+    if (summary.categories.isEmpty()) {
+        // Don't show the card if there are no categories of this type
+        return
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick(summary.type) }, // Made the card clickable
+            .clickable { onClick(summary.type) },
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
+        Column(modifier = Modifier.padding(16.dp)) {
             // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -44,31 +48,20 @@ fun SimpleCategorySummaryCard(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
-
                 Text(
                     text = "${summary.categories.size} categories",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-
             Spacer(modifier = Modifier.height(12.dp))
 
             // Progress bar
             LinearProgressIndicator(
                 progress = { summary.progress },
                 modifier = Modifier.fillMaxWidth(),
-                color = when {
-                    summary.type == CategoryType.INCOME -> {
-                        if (summary.actual >= summary.budgeted) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.error
-                    }
-                    summary.isOverBudget -> MaterialTheme.colorScheme.error
-                    summary.progress > 0.8f -> MaterialTheme.colorScheme.tertiary
-                    else -> MaterialTheme.colorScheme.primary
-                }
+                color = if (summary.isOverBudget) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
             )
-
             Spacer(modifier = Modifier.height(8.dp))
 
             // Amount details
@@ -76,57 +69,32 @@ fun SimpleCategorySummaryCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column {
-                    Text(
-                        text = "Budgeted",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "$${String.format("%.0f", summary.budgeted)}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-
-                Column {
-                    Text(
-                        text = if (summary.type == CategoryType.INCOME) "Earned" else "Spent",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "$${String.format("%.0f", summary.actual)}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = if (summary.isOverBudget && summary.type != CategoryType.INCOME)
-                            MaterialTheme.colorScheme.error
-                        else
-                            MaterialTheme.colorScheme.primary
-                    )
-                }
-
-                Column {
-                    Text(
-                        text = if (summary.type == CategoryType.INCOME) "Needed" else "Remaining",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "$${String.format("%.0f", kotlin.math.abs(summary.remaining))}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = if (summary.type == CategoryType.INCOME) {
-                            if (summary.actual >= summary.budgeted) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.error
-                        } else {
-                            if (summary.isOverBudget) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.primary
-                        }
-                    )
-                }
+                AmountColumn("Budgeted", summary.budgeted)
+                AmountColumn(if (summary.type == CategoryType.INCOME) "Earned" else "Spent", summary.actual)
+                AmountColumn(
+                    label = "Available",
+                    amount = summary.available,
+                    color = if (summary.available < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                )
             }
         }
+    }
+}
+
+@Composable
+private fun AmountColumn(label: String, amount: Double, color: androidx.compose.ui.graphics.Color? = null) {
+    Column {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = "$${String.format("%,.0f", amount)}",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = color ?: LocalContentColor.current
+        )
     }
 }
 

@@ -1,6 +1,8 @@
 package com.example.budgetingapp.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,7 +19,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -28,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -37,77 +39,49 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.budgetingapp.data.model.Category
 import com.example.budgetingapp.data.model.CategoryType
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CategoryCreationScreen(
+    categoryId: String?,
+    defaultCategoryType: String?,
     onNavigateBack: () -> Unit,
-    onCategoryCreated: () -> Unit,
-    existingCategory: Category? = null,
+    onCategorySaved: () -> Unit,
     viewModel: CategoryViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val formState = uiState.formState
-    val isEditMode = existingCategory != null
 
-    // Initialize the form
-    LaunchedEffect(existingCategory) {
-        if (existingCategory != null) {
-            viewModel.initializeForEdit(existingCategory)
-        } else {
-            viewModel.initializeForCreate()
-        }
+    LaunchedEffect(categoryId, defaultCategoryType) {
+        viewModel.initialize(categoryId, defaultCategoryType)
     }
 
-    // Handle success
-    LaunchedEffect(uiState.categoryCreated, uiState.categoryUpdated) {
-        if (uiState.categoryCreated || uiState.categoryUpdated) {
-            onCategoryCreated()
-            viewModel.markCategoryCreatedHandled()
-            viewModel.markCategoryUpdatedHandled()
+    LaunchedEffect(uiState.isSuccess) {
+        if (uiState.isSuccess) {
+            onCategorySaved()
+            viewModel.operationHandled()
         }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    Text(
-                        text = if (isEditMode) "Edit Category" else "Create Category",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                },
+                title = { Text(if (uiState.isEditMode) "Edit Category" else "Create Category") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowBack,
-                            contentDescription = "Back"
-                        )
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = { viewModel.saveCategory() },
-                        enabled = formState.isValid && !uiState.isLoading
-                    ) {
+                    IconButton(onClick = { viewModel.saveCategory() }, enabled = formState.isValid && !uiState.isLoading) {
                         if (uiState.isLoading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
                         } else {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = "Save Category"
-                            )
+                            Icon(Icons.Default.Check, contentDescription = "Save")
                         }
                     }
                 },
@@ -120,189 +94,130 @@ fun CategoryCreationScreen(
             )
         }
     ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // Error message
-            uiState.errorMessage?.let { errorMessage ->
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    )
-                ) {
-                    Text(
-                        text = errorMessage,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.padding(16.dp)
-                    )
-                }
+        if (uiState.isLoading) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
             }
-
-            // Category Name Input
-            OutlinedTextField(
-                value = formState.name,
-                onValueChange = { viewModel.updateName(it) },
-                label = { Text("Category Name") },
-                placeholder = { Text("e.g., Groceries, Salary, Rent") },
-                isError = formState.nameError != null,
-                supportingText = formState.nameError?.let { { Text(it) } },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-
-            // Category Type Selection
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
-                ) {
-                    Text(
-                        text = "Category Type",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    CategoryType.values().forEach { type ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = formState.type == type,
-                                onClick = { viewModel.updateType(type) }
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    text = getCategoryTypeDisplay(type),
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    text = getCategoryTypeDescription(type),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Target Amount Input
-            OutlinedTextField(
-                value = formState.targetAmount,
-                onValueChange = { viewModel.updateTargetAmount(it) },
-                label = { Text(getAmountLabel(formState.type)) },
-                placeholder = { Text("0.00") },
-                leadingIcon = { Text("$") },
-                isError = formState.amountError != null,
-                supportingText = formState.amountError?.let { { Text(it) } },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-            )
-
-            // Description Input (Optional)
-            OutlinedTextField(
-                value = formState.description,
-                onValueChange = { viewModel.updateDescription(it) },
-                label = { Text("Description (Optional)") },
-                placeholder = { Text("Add notes about this category...") },
-                modifier = Modifier.fillMaxWidth(),
-                maxLines = 3
-            )
-
-            // Save Button
-            Button(
-                onClick = { viewModel.saveCategory() },
-                enabled = formState.isValid && !uiState.isLoading,
+        } else {
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                if (uiState.isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                } else {
-                    Text(
-                        text = if (isEditMode) "Update Category" else "Create Category",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
+                OutlinedTextField(
+                    value = formState.name,
+                    onValueChange = { viewModel.updateName(it) },
+                    label = { Text("Category Name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = formState.nameError != null,
+                    supportingText = { formState.nameError?.let { Text(it) } },
+                    singleLine = true
+                )
 
-            // Help Text
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                OutlinedTextField(
+                    value = formState.targetAmount,
+                    onValueChange = { viewModel.updateTargetAmount(it) },
+                    label = { Text(if (formState.type == CategoryType.INCOME) "Expected Income" else "Monthly Budget") },
+                    modifier = Modifier.fillMaxWidth(),
+                    leadingIcon = { Text("$") },
+                    isError = formState.amountError != null,
+                    supportingText = { formState.amountError?.let { Text(it) } },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true
                 )
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
+
+                CategoryTypeSelector(
+                    selectedType = formState.type,
+                    onTypeSelected = { viewModel.updateType(it) }
+                )
+
+                RolloverSelector(
+                    isEnabled = formState.isRolloverEnabled,
+                    onToggle = { viewModel.updateIsRolloverEnabled(it) }
+                )
+
+                OutlinedTextField(
+                    value = formState.description,
+                    onValueChange = { viewModel.updateDescription(it) },
+                    label = { Text("Description (Optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 3
+                )
+
+                Spacer(modifier = Modifier.weight(1f)) // Pushes the button to the bottom
+
+                // ** THE FIX IS HERE **
+                // A clear, user-friendly button at the bottom of the screen.
+                Button(
+                    onClick = { viewModel.saveCategory() },
+                    enabled = formState.isValid && !uiState.isLoading,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
                 ) {
-                    Text(
-                        text = "💡 Tip",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = when (formState.type) {
-                            CategoryType.INCOME -> "Set your expected income amount. Earning more than this target is great!"
-                            CategoryType.FIXED_EXPENSE -> "Fixed expenses are automatically marked as 'spent' since they're predictable and consistent (rent, subscriptions, loans)."
-                            CategoryType.VARIABLE_EXPENSE -> "Variable expenses change monthly but are necessary (utilities, groceries). Track actual spending against your budget."
-                            CategoryType.DISCRETIONARY_EXPENSE -> "Discretionary expenses are optional spending you can control (dining out, entertainment). Track to stay within budget."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    if (uiState.isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    } else {
+                        Text(if (uiState.isEditMode) "Save Changes" else "Create Category")
+                    }
                 }
             }
         }
     }
 }
 
-private fun getCategoryTypeDisplay(type: CategoryType): String {
-    return when (type) {
-        CategoryType.INCOME -> "Income"
-        CategoryType.FIXED_EXPENSE -> "Fixed Expense"
-        CategoryType.VARIABLE_EXPENSE -> "Variable Expense"
-        CategoryType.DISCRETIONARY_EXPENSE -> "Discretionary Expense"
+@Composable
+private fun CategoryTypeSelector(
+    selectedType: CategoryType,
+    onTypeSelected: (CategoryType) -> Unit
+) {
+    Column {
+        Text("Category Type", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        CategoryType.values().forEach { type ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onTypeSelected(type) }
+                    .padding(vertical = 4.dp)
+            ) {
+                RadioButton(selected = selectedType == type, onClick = { onTypeSelected(type) })
+                Spacer(Modifier.width(8.dp))
+                Text(type.name.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() })
+            }
+        }
     }
 }
 
-private fun getCategoryTypeDescription(type: CategoryType): String {
-    return when (type) {
-        CategoryType.INCOME -> "Salary, freelance, investments"
-        CategoryType.FIXED_EXPENSE -> "Rent, subscriptions, loan payments"
-        CategoryType.VARIABLE_EXPENSE -> "Utilities, groceries, maintenance"
-        CategoryType.DISCRETIONARY_EXPENSE -> "Dining out, entertainment, hobbies"
-    }
-}
-
-private fun getAmountLabel(type: CategoryType): String {
-    return when (type) {
-        CategoryType.INCOME -> "Expected Income Amount"
-        else -> "Budget Amount"
+@Composable
+private fun RolloverSelector(isEnabled: Boolean, onToggle: (Boolean) -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Enable Rollover", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = "Carry over unused funds to the next month.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = isEnabled, onCheckedChange = onToggle)
+        }
     }
 }

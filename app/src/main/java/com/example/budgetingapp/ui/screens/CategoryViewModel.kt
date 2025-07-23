@@ -18,8 +18,7 @@ data class CategoryUiState(
     val originalCategory: Category? = null,
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
-    val categoryCreated: Boolean = false,
-    val categoryUpdated: Boolean = false,
+    val isSuccess: Boolean = false,
     val isEditMode: Boolean = false
 )
 
@@ -31,193 +30,131 @@ class CategoryViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(CategoryUiState())
     val uiState: StateFlow<CategoryUiState> = _uiState.asStateFlow()
 
-    // Expose repository's categories flow
-    val categoriesFlow = repository.categoriesFlow
+    fun initialize(categoryId: String?, defaultCategoryType: String?) {
+        if (categoryId != null) {
+            // Editing an existing category
+            viewModelScope.launch {
+                _uiState.value = _uiState.value.copy(isLoading = true)
+                val category = repository.getCategoryById(categoryId)
+                if (category != null) {
+                    initializeForEdit(category)
+                } else {
+                    _uiState.value = _uiState.value.copy(errorMessage = "Category not found.", isLoading = false)
+                }
+            }
+        } else {
+            // Creating a new category
+            initializeForCreate(defaultCategoryType)
+        }
+    }
 
-    // Initialize for editing an existing category
-    fun initializeForEdit(category: Category) {
+    private fun initializeForEdit(category: Category) {
         val formState = CategoryFormState(
             name = category.name,
             type = category.type,
             targetAmount = category.targetAmount.toString(),
-            description = category.description
+            description = category.description,
+            isRolloverEnabled = category.isRolloverEnabled
         ).validate()
 
         _uiState.value = _uiState.value.copy(
             formState = formState,
             originalCategory = category,
-            isEditMode = true
+            isEditMode = true,
+            isLoading = false
         )
     }
 
-    // Initialize for creating a new category
-    fun initializeForCreate() {
-        _uiState.value = _uiState.value.copy(
-            formState = CategoryFormState(),
-            originalCategory = null,
-            isEditMode = false
-        )
+    private fun initializeForCreate(defaultCategoryType: String?) {
+        // ** THE FIX IS HERE **
+        // It now defaults to INCOME when no specific type is provided.
+        val defaultType = try {
+            defaultCategoryType?.let { CategoryType.valueOf(it) } ?: CategoryType.INCOME
+        } catch (e: IllegalArgumentException) {
+            CategoryType.INCOME
+        }
+        _uiState.value = CategoryUiState(formState = CategoryFormState(type = defaultType))
     }
 
     fun updateName(name: String) {
-        val currentForm = _uiState.value.formState
-        val updatedForm = currentForm.copy(name = name).validate()
-        _uiState.value = _uiState.value.copy(formState = updatedForm)
-    }
-
-    fun updateType(type: CategoryType) {
-        val currentForm = _uiState.value.formState
-        val updatedForm = currentForm.copy(type = type).validate()
-        _uiState.value = _uiState.value.copy(formState = updatedForm)
-    }
-
-    fun updateTargetAmount(amount: String) {
-        val currentForm = _uiState.value.formState
-        val updatedForm = currentForm.copy(targetAmount = amount).validate()
-        _uiState.value = _uiState.value.copy(formState = updatedForm)
-    }
-
-    fun updateDescription(description: String) {
-        val currentForm = _uiState.value.formState
-        val updatedForm = currentForm.copy(description = description).validate()
-        _uiState.value = _uiState.value.copy(formState = updatedForm)
-    }
-
-    fun saveCategory() {
-        if (_uiState.value.isEditMode) {
-            updateCategory()
-        } else {
-            createCategory()
-        }
-    }
-
-    private fun createCategory() {
-        val formState = _uiState.value.formState.validate()
-        _uiState.value = _uiState.value.copy(formState = formState)
-
-        if (!formState.isValid) {
-            return
-        }
-
-        viewModelScope.launch {
-            try {
-                _uiState.value = _uiState.value.copy(isLoading = true)
-
-                val category = Category(
-                    name = formState.name.trim(),
-                    type = formState.type,
-                    targetAmount = formState.targetAmount.toDouble(),
-                    description = formState.description.trim(),
-                    monthId = repository.getCurrentMonth()?.id ?: "default_month",
-                    // Auto-set actualAmount for fixed expenses
-                    actualAmount = if (formState.type == CategoryType.FIXED_EXPENSE) {
-                        formState.targetAmount.toDouble()
-                    } else {
-                        0.0
-                    }
-                )
-
-                val result = repository.createCategory(category)
-
-                if (result.isSuccess) {
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        categoryCreated = true,
-                        formState = CategoryFormState() // Reset form
-                    )
-                } else {
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        errorMessage = "Failed to create category: ${result.exceptionOrNull()?.message}"
-                    )
-                }
-
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    errorMessage = "Failed to create category: ${e.message}"
-                )
-            }
-        }
-    }
-
-    private fun updateCategory() {
-        val formState = _uiState.value.formState.validate()
-        _uiState.value = _uiState.value.copy(formState = formState)
-
-        if (!formState.isValid) {
-            return
-        }
-
-        val originalCategory = _uiState.value.originalCategory
-        if (originalCategory == null) {
-            _uiState.value = _uiState.value.copy(
-                errorMessage = "Original category not found"
-            )
-            return
-        }
-
-        viewModelScope.launch {
-            try {
-                _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
-
-                val updatedCategory = originalCategory.copy(
-                    name = formState.name.trim(),
-                    type = formState.type,
-                    targetAmount = formState.targetAmount.toDouble(),
-                    description = formState.description.trim()
-                )
-
-                val result = repository.updateCategory(updatedCategory)
-
-                if (result.isSuccess) {
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        categoryUpdated = true
-                    )
-                } else {
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        errorMessage = "Failed to update category: ${result.exceptionOrNull()?.message}"
-                    )
-                }
-
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    errorMessage = "Failed to update category: ${e.message}"
-                )
-            }
-        }
-    }
-
-    fun clearError() {
-        _uiState.value = _uiState.value.copy(errorMessage = null)
-    }
-
-    fun resetForm() {
         _uiState.value = _uiState.value.copy(
-            formState = CategoryFormState(),
-            categoryCreated = false,
-            categoryUpdated = false,
-            isEditMode = false,
-            originalCategory = null
+            formState = _uiState.value.formState.copy(name = name).validate()
         )
     }
 
-    fun markCategoryCreatedHandled() {
-        _uiState.value = _uiState.value.copy(categoryCreated = false)
+    fun updateType(type: com.example.budgetingapp.data.model.CategoryType) {
+        _uiState.value = _uiState.value.copy(
+            formState = _uiState.value.formState.copy(type = type).validate()
+        )
     }
 
-    fun markCategoryUpdatedHandled() {
-        _uiState.value = _uiState.value.copy(categoryUpdated = false)
+    fun updateTargetAmount(amount: String) {
+        _uiState.value = _uiState.value.copy(
+            formState = _uiState.value.formState.copy(targetAmount = amount).validate()
+        )
     }
 
-    // Delegate to repository for data access
-    suspend fun getCategoriesByType(type: CategoryType) = repository.getCategoriesForCurrentMonthByType(type)
-    suspend fun getAllCategories() = repository.getCategoriesForCurrentMonth()
-    suspend fun getTotalIncome() = repository.getTotalIncome()
-    suspend fun getTotalExpenses() = repository.getTotalExpenses()
-    suspend fun getTotalByType(type: CategoryType) = repository.getTotalByType(type)
-    suspend fun getRemainingBudget() = repository.getRemainingBudget()
+    fun updateDescription(description: String) {
+        _uiState.value = _uiState.value.copy(
+            formState = _uiState.value.formState.copy(description = description).validate()
+        )
+    }
+
+    fun updateIsRolloverEnabled(isEnabled: Boolean) {
+        _uiState.value = _uiState.value.copy(
+            formState = _uiState.value.formState.copy(isRolloverEnabled = isEnabled).validate()
+        )
+    }
+
+    fun saveCategory() {
+        val formState = _uiState.value.formState
+        if (!formState.isValid) return
+
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
+
+            val result = if (_uiState.value.isEditMode) {
+                updateCategory(formState)
+            } else {
+                createCategory(formState)
+            }
+
+            if (result.isSuccess) {
+                _uiState.value = _uiState.value.copy(isLoading = false, isSuccess = true)
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = result.exceptionOrNull()?.message ?: "An unknown error occurred"
+                )
+            }
+        }
+    }
+
+    private suspend fun createCategory(formState: CategoryFormState): Result<Unit> {
+        val category = Category(
+            name = formState.name.trim(),
+            type = formState.type,
+            targetAmount = formState.targetAmount.toDouble(),
+            description = formState.description.trim(),
+            isRolloverEnabled = formState.isRolloverEnabled,
+            monthId = ""
+        )
+        return repository.createCategory(category)
+    }
+
+    private suspend fun updateCategory(formState: CategoryFormState): Result<Unit> {
+        val originalCategory = _uiState.value.originalCategory ?: return Result.failure(Exception("Original category not found"))
+        val updatedCategory = originalCategory.copy(
+            name = formState.name.trim(),
+            type = formState.type,
+            targetAmount = formState.targetAmount.toDouble(),
+            description = formState.description.trim(),
+            isRolloverEnabled = formState.isRolloverEnabled
+        )
+        return repository.updateCategory(updatedCategory)
+    }
+
+    fun operationHandled() {
+        _uiState.value = _uiState.value.copy(isSuccess = false, errorMessage = null)
+    }
 }

@@ -3,8 +3,6 @@ package com.example.budgetingapp.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -41,7 +39,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.budgetingapp.data.model.Category
 import com.example.budgetingapp.data.model.CategoryType
@@ -62,7 +59,6 @@ fun TransactionEntryDialog(
     var showDatePicker by remember { mutableStateOf(false) }
     val isEditing = existingTransaction != null
 
-    // Reset form when dialog opens
     LaunchedEffect(category.id, existingTransaction?.id) {
         if (isEditing && existingTransaction != null) {
             viewModel.initializeForEdit(existingTransaction)
@@ -72,19 +68,17 @@ fun TransactionEntryDialog(
         }
     }
 
-    // Handle successful transaction creation/update
+    // ** THE FIX IS HERE **
+    // The dialog now automatically calls onDismiss() after a successful transaction.
     LaunchedEffect(uiState.transactionCreated) {
         if (uiState.transactionCreated) {
-            onTransactionAdded()
-            onDismiss()
-            viewModel.markTransactionCreatedHandled()
+            onTransactionAdded() // Notifies the parent screen to refresh its data
+            onDismiss() // Closes the dialog
+            viewModel.markTransactionCreatedHandled() // Resets the state for the next operation
         }
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        modifier = Modifier.fillMaxHeight(0.7f)
-    ) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -118,7 +112,6 @@ fun TransactionEntryDialog(
                 }
             }
 
-            // Category info card
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -138,7 +131,7 @@ fun TransactionEntryDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = "$${String.format("%.2f", category.targetAmount)}",
+                            text = "$${String.format("%,.2f", category.targetAmount)}",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
@@ -146,12 +139,12 @@ fun TransactionEntryDialog(
 
                     Column {
                         Text(
-                            text = "Spent",
+                            text = if (category.type == CategoryType.INCOME) "Earned" else "Spent",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = "$${String.format("%.2f", category.actualAmount)}",
+                            text = "$${String.format("%,.2f", category.actualAmount)}",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = if (category.isOverBudget && category.type != CategoryType.INCOME)
@@ -163,12 +156,12 @@ fun TransactionEntryDialog(
 
                     Column {
                         Text(
-                            text = if (category.type == CategoryType.INCOME) "Needed" else "Remaining",
+                            text = if (category.type == CategoryType.INCOME) "Remaining Goal" else "Available",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = "$${String.format("%.2f", kotlin.math.abs(category.remainingAmount))}",
+                            text = "$${String.format("%,.2f", kotlin.math.abs(category.amountAvailable))}",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = if (category.type == CategoryType.INCOME) {
@@ -177,10 +170,10 @@ fun TransactionEntryDialog(
                                 else
                                     MaterialTheme.colorScheme.error
                             } else {
-                                if (category.actualAmount <= category.targetAmount)
-                                    MaterialTheme.colorScheme.primary
-                                else
+                                if (category.amountAvailable < 0)
                                     MaterialTheme.colorScheme.error
+                                else
+                                    MaterialTheme.colorScheme.primary
                             }
                         )
                     }
@@ -195,7 +188,7 @@ fun TransactionEntryDialog(
                 placeholder = { Text("0.00") },
                 leadingIcon = { Text("$") },
                 isError = uiState.formState.amountError != null,
-                supportingText = uiState.formState.amountError?.let { { Text(it) } },
+                supportingText = { uiState.formState.amountError?.let { Text(it) } },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
@@ -228,29 +221,13 @@ fun TransactionEntryDialog(
                 maxLines = 3
             )
 
-            // Error message
-            uiState.errorMessage?.let { errorMessage ->
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    )
-                ) {
-                    Text(
-                        text = errorMessage,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.padding(16.dp)
-                    )
-                }
-            }
-
             // Add/Update transaction button
             Button(
                 onClick = {
                     if (isEditing) {
-                        viewModel.updateTransaction()
+                        viewModel.submitTransaction()
                     } else {
-                        viewModel.createTransaction()
+                        viewModel.submitTransaction()
                     }
                 },
                 enabled = uiState.formState.isValid && !uiState.isLoading,
@@ -269,18 +246,13 @@ fun TransactionEntryDialog(
                 } else {
                     Text(
                         text = if (isEditing) "Update Transaction" else getButtonText(category.type),
-                        fontSize = 16.sp,
                         fontWeight = FontWeight.Medium
                     )
                 }
             }
-
-            // Add some bottom padding
-            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 
-    // Date picker dialog
     if (showDatePicker) {
         val datePickerState = rememberDatePickerState(
             initialSelectedDateMillis = uiState.formState.date.toEpochDay() * 24 * 60 * 60 * 1000
@@ -315,9 +287,7 @@ fun TransactionEntryDialog(
 private fun getTransactionTitle(type: CategoryType): String {
     return when (type) {
         CategoryType.INCOME -> "Add Income"
-        CategoryType.FIXED_EXPENSE -> "Add Fixed Expense"
-        CategoryType.VARIABLE_EXPENSE -> "Add Variable Expense"
-        CategoryType.DISCRETIONARY_EXPENSE -> "Add Discretionary Expense"
+        else -> "Add Expense"
     }
 }
 

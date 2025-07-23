@@ -13,9 +13,23 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import javax.inject.Inject
+
+data class CategorySummary(
+    val type: CategoryType,
+    val budgeted: Double,
+    val actual: Double,
+    val rollover: Double,
+    val categories: List<Category>
+) {
+    val totalBudgeted: Double get() = budgeted + rollover
+    val available: Double get() = totalBudgeted - actual
+    val isOverBudget: Boolean get() = actual > totalBudgeted
+    val progress: Float get() = if (totalBudgeted > 0) (actual / totalBudgeted).toFloat().coerceIn(0f, 1f) else 0f
+}
 
 data class MonthlyData(
     val monthName: String,
@@ -24,29 +38,18 @@ data class MonthlyData(
     val savings: Double
 )
 
-data class CategorySummary(
-    val type: CategoryType,
-    val budgeted: Double,
-    val actual: Double,
-    val categories: List<Category>
-) {
-    val remaining: Double get() = if (type == CategoryType.INCOME) actual - budgeted else budgeted - actual
-    val isOverBudget: Boolean get() = if (type == CategoryType.INCOME) actual < budgeted else actual > budgeted
-    val progress: Float get() = if (budgeted > 0) (actual / budgeted).toFloat().coerceIn(0f, 1f) else 0f
-}
-
 data class YearlyOverview(
     val plannedIncome: Double,
     val actualIncome: Double,
     val plannedExpenses: Double,
-    val actualExpenses: Double,
-    val plannedSavings: Double,
-    val actualSavings: Double,
-    val monthsWithData: Int
-)
+    val actualExpenses: Double
+) {
+    val plannedSavings: Double get() = plannedIncome - plannedExpenses
+    val actualSavings: Double get() = actualIncome - actualExpenses
+}
 
 data class HomeUiState(
-    val isLoading: Boolean = false,
+    val isLoading: Boolean = true,
     val quickEntryExpanded: Boolean = false,
     val quickEntryForm: TransactionFormState = TransactionFormState(),
     val selectedCategoryType: CategoryType = CategoryType.DISCRETIONARY_EXPENSE,
@@ -58,7 +61,6 @@ data class HomeUiState(
     val transactionSubmitted: Boolean = false,
     val errorMessage: String? = null,
     val currentMonth: Month? = null,
-    val isCurrentMonthPreviewOnly: Boolean = false,
     val showMonthManagementDialog: Boolean = false
 )
 
@@ -74,165 +76,106 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             combine(
                 repository.currentMonthFlow,
-                repository.categoriesFlow,
+                repository.allMonthsFlow,
+                repository.allCategoriesFlow,
                 repository.transactionsFlow
-            ) { currentMonthFromRepo, _, _ ->
-                val isPreviewOnly = currentMonthFromRepo?.let {
-                    repository.isMonthPreviewOnly(it.id)
-                } ?: false
-
-                _uiState.value = _uiState.value.copy(
-                    currentMonth = currentMonthFromRepo,
-                    isCurrentMonthPreviewOnly = isPreviewOnly
-                )
-                updateDashboardData()
+            ) { currentMonth, allMonths, allCategories, allTransactions ->
+                updateAllData(currentMonth, allMonths, allCategories, allTransactions)
             }.collect {}
         }
     }
 
-    private suspend fun updateDashboardData() {
-        _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
+    // ** THE FIX IS HERE **
+    // This function has been rewritten to process data from a single source of truth,
+    // ensuring all calculations are always in sync.
+    private fun updateAllData(
+        currentMonth: Month?,
+        allMonths: List<Month>,
+        allCategories: List<Category>,
+        allTransactions: List<Transaction>
+    ) {
+        // Create a definitive map of transactions grouped by their category.
+        val transactionsByCategoryId = allTransactions.groupBy { it.categoryId }
 
-        try {
-            val categorySummaries = loadCategorySummaries()
-            val monthlyData = loadMonthlyData()
-            val yearlyOverview = calculateYearlyOverview(monthlyData)
-
-            val currentSelectedCategoryType = _uiState.value.selectedCategoryType
-            val availableCategories = repository.getCategoriesForCurrentMonthByType(currentSelectedCategoryType)
-
-            _uiState.value = _uiState.value.copy(
-                isLoading = false,
-                categorySummaries = categorySummaries,
-                monthlyData = monthlyData,
-                yearlyOverview = yearlyOverview,
-                availableCategories = availableCategories,
-                selectedCategory = _uiState.value.selectedCategory?.let { currentCat ->
-                    availableCategories.find { it.id == currentCat.id }
-                } ?: availableCategories.firstOrNull()
-            )
-
-        } catch (e: Exception) {
-            _uiState.value = _uiState.value.copy(
-                isLoading = false,
-                errorMessage = "Failed to load dashboard data: ${e.message}"
-            )
+        // Create a definitive list of all categories, with their actual amounts correctly calculated from the map above.
+        val allCategoriesWithActuals = allCategories.map { category ->
+            val actualAmount = transactionsByCategoryId[category.id]?.sumOf { it.amount } ?: 0.0
+            category.copy(actualAmount = actualAmount)
         }
-    }
 
-    private suspend fun loadCategorySummaries(): List<CategorySummary> {
-        return CategoryType.values().map { type ->
-            val categories = repository.getCategoriesForCurrentMonthByType(type)
+        // Group these definitive categories by month ID. This is our single source of truth.
+        val categoriesByMonthId = allCategoriesWithActuals.groupBy { it.monthId }
+
+        // --- Current Month Calculation ---
+        val currentCategories = categoriesByMonthId[currentMonth?.id] ?: emptyList()
+        val summaries = CategoryType.values().map { type ->
+            val typeCategories = currentCategories.filter { it.type == type }
             CategorySummary(
                 type = type,
-                budgeted = categories.sumOf { it.targetAmount },
-                actual = categories.sumOf { it.actualAmount },
-                categories = categories
-            )
-        }
-    }
-
-    private suspend fun loadMonthlyData(): List<MonthlyData> {
-        return try {
-            val allMonths = repository.getAllMonths().take(12)
-
-            allMonths.map { month ->
-                val monthCategories = repository.getCategoriesForMonth(month.id)
-                val income = monthCategories.filter { it.type == CategoryType.INCOME }.sumOf { it.actualAmount }
-                val expenses = monthCategories.filter { it.type != CategoryType.INCOME }.sumOf { it.actualAmount }
-
-                MonthlyData(
-                    monthName = "${month.name} ${month.year}",
-                    income = income,
-                    expenses = expenses,
-                    savings = income - expenses
-                )
-            }.reversed()
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
-
-    private suspend fun calculateYearlyOverview(monthlyData: List<MonthlyData>): YearlyOverview {
-        val monthsWithActualData = monthlyData.filter { it.income > 0 || it.expenses > 0 }
-
-        if (monthsWithActualData.isEmpty()) {
-            return YearlyOverview(
-                plannedIncome = 0.0,
-                actualIncome = 0.0,
-                plannedExpenses = 0.0,
-                actualExpenses = 0.0,
-                plannedSavings = 0.0,
-                actualSavings = 0.0,
-                monthsWithData = 0
+                budgeted = typeCategories.sumOf { it.targetAmount },
+                actual = typeCategories.sumOf { it.actualAmount },
+                rollover = typeCategories.sumOf { it.rolloverBalance },
+                categories = typeCategories
             )
         }
 
-        // Calculate planned totals from all months with data
+        // --- Yearly and Monthly Calculation (derived from the same source of truth) ---
+        val yearlyOverview = calculateYearlyOverview(allMonths, categoriesByMonthId)
+        val monthlyData = allMonths.take(12).map { month ->
+            val categoriesForMonth = categoriesByMonthId[month.id] ?: emptyList()
+            val income = categoriesForMonth.filter { it.type == CategoryType.INCOME }.sumOf { it.actualAmount }
+            val expenses = categoriesForMonth.filter { it.type != CategoryType.INCOME }.sumOf { it.actualAmount }
+            MonthlyData(
+                monthName = month.displayName,
+                income = income,
+                expenses = expenses,
+                savings = income - expenses
+            )
+        }.reversed()
+
+        // --- Quick Entry Calculation ---
+        val currentSelectedType = _uiState.value.selectedCategoryType
+        val available = currentCategories.filter { it.type == currentSelectedType }
+
+        // --- Final State Update ---
+        _uiState.value = _uiState.value.copy(
+            isLoading = false,
+            currentMonth = currentMonth,
+            categorySummaries = summaries,
+            monthlyData = monthlyData,
+            yearlyOverview = yearlyOverview,
+            availableCategories = available,
+            selectedCategory = _uiState.value.selectedCategory?.let { current -> available.find { it.id == current.id } } ?: available.firstOrNull()
+        )
+    }
+
+    private fun calculateYearlyOverview(
+        allMonths: List<Month>,
+        categoriesByMonthId: Map<String, List<Category>>
+    ): YearlyOverview {
         var plannedIncome = 0.0
         var plannedExpenses = 0.0
+        var actualIncome = 0.0
+        var actualExpenses = 0.0
 
-        monthsWithActualData.forEach { monthData ->
-            // For each month, get the planned amounts from categories
-            try {
-                val allMonths = repository.getAllMonths()
-                val month = allMonths.find { "${it.name} ${it.year}" == monthData.monthName }
-                if (month != null) {
-                    val categories = repository.getCategoriesForMonth(month.id)
-                    plannedIncome += categories.filter { it.type == CategoryType.INCOME }.sumOf { it.targetAmount }
-                    plannedExpenses += categories.filter { it.type != CategoryType.INCOME }.sumOf { it.targetAmount }
-                }
-            } catch (e: Exception) {
-                // If we can't get planned data, skip this month
-            }
+        allMonths.take(12).forEach { month ->
+            val categoriesForMonth = categoriesByMonthId[month.id] ?: emptyList()
+
+            plannedIncome += categoriesForMonth.filter { it.type == CategoryType.INCOME }.sumOf { it.targetAmount }
+            plannedExpenses += categoriesForMonth.filter { it.type != CategoryType.INCOME }.sumOf { it.targetAmount }
+
+            actualIncome += categoriesForMonth.filter { it.type == CategoryType.INCOME }.sumOf { it.actualAmount }
+            actualExpenses += categoriesForMonth.filter { it.type != CategoryType.INCOME }.sumOf { it.actualAmount }
         }
-
-        // Calculate actual totals
-        val actualIncome = monthsWithActualData.sumOf { it.income }
-        val actualExpenses = monthsWithActualData.sumOf { it.expenses }
-        val actualSavings = actualIncome - actualExpenses
-        val plannedSavings = plannedIncome - plannedExpenses
 
         return YearlyOverview(
             plannedIncome = plannedIncome,
             actualIncome = actualIncome,
             plannedExpenses = plannedExpenses,
-            actualExpenses = actualExpenses,
-            plannedSavings = plannedSavings,
-            actualSavings = actualSavings,
-            monthsWithData = monthsWithActualData.size
+            actualExpenses = actualExpenses
         )
     }
 
-    fun navigateToPreviousMonth() {
-        viewModelScope.launch {
-            try {
-                _uiState.value = _uiState.value.copy(isLoading = true)
-                repository.navigateToPreviousMonth()
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    errorMessage = "Failed to navigate to previous month: ${e.message}"
-                )
-            }
-        }
-    }
-
-    fun navigateToNextMonth() {
-        viewModelScope.launch {
-            try {
-                _uiState.value = _uiState.value.copy(isLoading = true)
-                repository.navigateToNextMonth()
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    errorMessage = "Failed to navigate to next month: ${e.message}"
-                )
-            }
-        }
-    }
-
-    // Month management functions
     fun showMonthManagementDialog() {
         _uiState.value = _uiState.value.copy(showMonthManagementDialog = true)
     }
@@ -243,73 +186,34 @@ class HomeViewModel @Inject constructor(
 
     fun deleteCurrentMonth() {
         viewModelScope.launch {
-            try {
-                val currentMonth = _uiState.value.currentMonth
-                if (currentMonth != null) {
-                    val isPreviewOnly = _uiState.value.isCurrentMonthPreviewOnly
-                    val result = repository.deleteMonth(currentMonth.id, force = !isPreviewOnly)
-
-                    if (result.isSuccess) {
-                        _uiState.value = _uiState.value.copy(showMonthManagementDialog = false)
-                    } else {
-                        _uiState.value = _uiState.value.copy(
-                            errorMessage = "Failed to delete month: ${result.exceptionOrNull()?.message}",
-                            showMonthManagementDialog = false
-                        )
-                    }
-                }
-            } catch (e: Exception) {
+            val monthId = _uiState.value.currentMonth?.id ?: return@launch
+            val result = repository.deleteMonth(monthId)
+            if (result.isSuccess) {
+                hideMonthManagementDialog()
+            } else {
                 _uiState.value = _uiState.value.copy(
-                    errorMessage = "Failed to delete month: ${e.message}",
+                    errorMessage = "Failed to delete month: ${result.exceptionOrNull()?.message}",
                     showMonthManagementDialog = false
                 )
             }
         }
     }
 
-    fun commitPreviewMonth() {
-        viewModelScope.launch {
-            try {
-                val currentMonth = _uiState.value.currentMonth
-                if (currentMonth != null) {
-                    val result = repository.commitPreviewMonth(currentMonth.id)
-
-                    if (result.isSuccess) {
-                        _uiState.value = _uiState.value.copy(
-                            showMonthManagementDialog = false,
-                            isCurrentMonthPreviewOnly = false
-                        )
-                        // Refresh data to show the committed changes
-                        updateDashboardData()
-                    } else {
-                        _uiState.value = _uiState.value.copy(
-                            errorMessage = "Failed to commit preview: ${result.exceptionOrNull()?.message}",
-                            showMonthManagementDialog = false
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    errorMessage = "Failed to commit preview: ${e.message}",
-                    showMonthManagementDialog = false
-                )
-            }
-        }
-    }
+    fun navigateToPreviousMonth() = viewModelScope.launch { repository.navigateToPreviousMonth() }
+    fun navigateToNextMonth() = viewModelScope.launch { repository.navigateToNextMonth() }
 
     fun toggleQuickEntry() {
-        _uiState.value = _uiState.value.copy(
-            quickEntryExpanded = !_uiState.value.quickEntryExpanded
-        )
+        _uiState.value = _uiState.value.copy(quickEntryExpanded = !_uiState.value.quickEntryExpanded)
     }
 
     fun updateCategoryType(type: CategoryType) {
+        _uiState.value = _uiState.value.copy(selectedCategoryType = type)
         viewModelScope.launch {
-            val categories = repository.getCategoriesForCurrentMonthByType(type)
+            val allCategories = repository.currentMonthCategoriesFlow.first()
+            val available = allCategories.filter { it.type == type }
             _uiState.value = _uiState.value.copy(
-                selectedCategoryType = type,
-                availableCategories = categories,
-                selectedCategory = categories.firstOrNull()
+                availableCategories = available,
+                selectedCategory = available.firstOrNull()
             )
         }
     }
@@ -319,70 +223,52 @@ class HomeViewModel @Inject constructor(
     }
 
     fun updateQuickEntryAmount(amount: String) {
-        val currentForm = _uiState.value.quickEntryForm
-        val updatedForm = currentForm.copy(amount = amount).validate()
-        _uiState.value = _uiState.value.copy(quickEntryForm = updatedForm)
+        _uiState.value = _uiState.value.copy(
+            quickEntryForm = _uiState.value.quickEntryForm.copy(amount = amount).validate()
+        )
     }
 
     fun updateQuickEntryDescription(description: String) {
-        val currentForm = _uiState.value.quickEntryForm
-        val updatedForm = currentForm.copy(description = description).validate()
-        _uiState.value = _uiState.value.copy(quickEntryForm = updatedForm)
+        _uiState.value = _uiState.value.copy(
+            quickEntryForm = _uiState.value.quickEntryForm.copy(description = description).validate()
+        )
     }
 
     fun updateQuickEntryDate(date: LocalDate) {
-        val currentForm = _uiState.value.quickEntryForm
-        val updatedForm = currentForm.copy(date = date).validate()
-        _uiState.value = _uiState.value.copy(quickEntryForm = updatedForm)
+        _uiState.value = _uiState.value.copy(
+            quickEntryForm = _uiState.value.quickEntryForm.copy(date = date).validate()
+        )
     }
 
     fun submitQuickTransaction() {
-        val formState = _uiState.value.quickEntryForm.validate()
-        _uiState.value = _uiState.value.copy(quickEntryForm = formState)
+        val formState = _uiState.value.quickEntryForm
+        val selectedCategory = _uiState.value.selectedCategory
 
-        if (!formState.isValid || _uiState.value.selectedCategory == null) {
-            _uiState.value = _uiState.value.copy(
-                errorMessage = if (!formState.isValid) "Please fill in all required fields" else "Please select a category"
-            )
+        if (!formState.isValid || selectedCategory == null) {
+            _uiState.value = _uiState.value.copy(errorMessage = "Please fill out the form and select a category.")
             return
         }
 
         viewModelScope.launch {
-            try {
-                val transaction = Transaction(
-                    categoryId = _uiState.value.selectedCategory!!.id,
-                    amount = formState.amount.toDouble(),
-                    description = formState.description.trim(),
-                    date = formState.date
-                )
-
-                val result = repository.createTransaction(transaction)
-
-                if (result.isSuccess) {
-                    _uiState.value = _uiState.value.copy(
-                        quickEntryForm = TransactionFormState(),
-                        transactionSubmitted = true,
-                        quickEntryExpanded = false
-                    )
-                } else {
-                    _uiState.value = _uiState.value.copy(
-                        errorMessage = "Failed to add transaction: ${result.exceptionOrNull()?.message}"
-                    )
-                }
-
-            } catch (e: Exception) {
+            val transaction = Transaction(
+                categoryId = selectedCategory.id,
+                amount = formState.amount.toDouble(),
+                description = formState.description.trim(),
+                date = formState.date
+            )
+            val result = repository.createTransaction(transaction)
+            if (result.isSuccess) {
                 _uiState.value = _uiState.value.copy(
-                    errorMessage = "Failed to add transaction: ${e.message}"
+                    transactionSubmitted = true,
+                    quickEntryForm = TransactionFormState()
                 )
+            } else {
+                _uiState.value = _uiState.value.copy(errorMessage = result.exceptionOrNull()?.message)
             }
         }
     }
 
-    fun clearError() {
-        _uiState.value = _uiState.value.copy(errorMessage = null)
-    }
-
-    fun markTransactionSubmittedHandled() {
-        _uiState.value = _uiState.value.copy(transactionSubmitted = false)
+    fun transactionHandled() {
+        _uiState.value = _uiState.value.copy(transactionSubmitted = false, errorMessage = null)
     }
 }

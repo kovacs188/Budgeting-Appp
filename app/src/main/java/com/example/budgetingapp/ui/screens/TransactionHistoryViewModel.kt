@@ -29,31 +29,21 @@ class TransactionHistoryViewModel @Inject constructor(
 
     fun loadTransactions(categoryId: String) {
         viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true)
             try {
-                _uiState.value = _uiState.value.copy(isLoading = true)
-
-                // Load category details
+                // Get category details (which now includes the calculated actualAmount)
                 val category = repository.getCategoryById(categoryId)
-
-                // Load transactions for this category
                 val transactions = repository.getTransactionsForCategory(categoryId)
 
-                // Update category with actual amount
-                val updatedCategory = category?.let {
-                    val actualAmount = repository.getActualSpendingForCategory(categoryId)
-                    it.copy(actualAmount = actualAmount)
-                }
-
                 _uiState.value = _uiState.value.copy(
-                    category = updatedCategory,
+                    category = category,
                     transactions = transactions,
                     isLoading = false
                 )
-
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    errorMessage = "Failed to load transactions: ${e.message}"
+                    errorMessage = "Failed to load history: ${e.message}"
                 )
             }
         }
@@ -61,65 +51,27 @@ class TransactionHistoryViewModel @Inject constructor(
 
     fun deleteTransaction(transactionId: String) {
         viewModelScope.launch {
-            try {
-                _uiState.value = _uiState.value.copy(isLoading = true)
-
-                val result = repository.deleteTransaction(transactionId)
-
-                if (result.isSuccess) {
-                    // Reload transactions after deletion
-                    val categoryId = _uiState.value.category?.id
-                    if (categoryId != null) {
-                        loadTransactions(categoryId)
-                    }
-                } else {
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        errorMessage = "Failed to delete transaction: ${result.exceptionOrNull()?.message}"
-                    )
-                }
-
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    errorMessage = "Failed to delete transaction: ${e.message}"
-                )
+            val result = repository.deleteTransaction(transactionId)
+            if (result.isSuccess) {
+                refreshTransactions()
+            } else {
+                _uiState.value = _uiState.value.copy(errorMessage = result.exceptionOrNull()?.message)
             }
         }
     }
 
     fun deleteCategory(categoryId: String) {
         viewModelScope.launch {
-            try {
-                _uiState.value = _uiState.value.copy(isLoading = true)
-
-                val result = repository.deleteCategory(categoryId)
-
-                if (result.isFailure) {
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        errorMessage = "Failed to delete category: ${result.exceptionOrNull()?.message}"
-                    )
-                }
-                // Note: If successful, the calling screen should navigate back
-
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    errorMessage = "Failed to delete category: ${e.message}"
-                )
+            val result = repository.deleteCategory(categoryId)
+            if (result.isFailure) {
+                _uiState.value = _uiState.value.copy(errorMessage = result.exceptionOrNull()?.message)
             }
         }
     }
 
     fun refreshTransactions() {
-        val categoryId = _uiState.value.category?.id
-        if (categoryId != null) {
-            loadTransactions(categoryId)
+        _uiState.value.category?.id?.let {
+            loadTransactions(it)
         }
-    }
-
-    fun clearError() {
-        _uiState.value = _uiState.value.copy(errorMessage = null)
     }
 }

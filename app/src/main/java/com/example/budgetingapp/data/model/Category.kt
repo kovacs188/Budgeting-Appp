@@ -17,24 +17,31 @@ data class Category(
     val id: String = generateCategoryId(),
     val name: String,
     val type: CategoryType,
-    val targetAmount: Double,
-    val actualAmount: Double = 0.0,
+    val targetAmount: Double, // The amount budgeted for this month
+    val actualAmount: Double = 0.0, // How much has been spent/earned this month
     val monthId: String,
     val createdDate: LocalDateTime = LocalDateTime.now(),
     val isActive: Boolean = true,
-    val description: String = ""
+    val description: String = "",
+    // New fields for rollover functionality
+    val isRolloverEnabled: Boolean = false, // Does this category carry a balance?
+    val rolloverBalance: Double = 0.0 // The balance carried over from the previous month
 ) {
-    val remainingAmount: Double
-        get() = when (type) {
-            CategoryType.INCOME -> actualAmount - targetAmount
-            else -> targetAmount - actualAmount
-        }
+    // Total funds available for this category in the current month
+    val totalBudgeted: Double
+        get() = targetAmount + rolloverBalance
 
+    // How much is left to spend/earn from the total available funds
+    val amountAvailable: Double
+        get() = totalBudgeted - actualAmount
+
+    // Progress against the total available funds
+    val progress: Float
+        get() = if (totalBudgeted > 0) (actualAmount / totalBudgeted).toFloat().coerceIn(0f, 1f) else 0f
+
+    // A category is over budget only if the user has spent more than the total funds available.
     val isOverBudget: Boolean
-        get() = when (type) {
-            CategoryType.INCOME -> actualAmount < targetAmount
-            else -> actualAmount > targetAmount
-        }
+        get() = actualAmount > totalBudgeted
 
     val displayType: String
         get() = when (type) {
@@ -45,19 +52,19 @@ data class Category(
         }
 
     companion object {
-        // Change from private to internal
         internal fun generateCategoryId(): String {
             return "category_${System.currentTimeMillis()}"
         }
     }
 }
 
-// Helper data class for category creation form
+// Updated form state to include the rollover flag
 data class CategoryFormState(
     val name: String = "",
-    val type: CategoryType = CategoryType.INCOME,
+    val type: CategoryType = CategoryType.DISCRETIONARY_EXPENSE,
     val targetAmount: String = "",
     val description: String = "",
+    val isRolloverEnabled: Boolean = false, // New field for the form
     val nameError: String? = null,
     val amountError: String? = null,
     val isValid: Boolean = false
@@ -65,14 +72,14 @@ data class CategoryFormState(
     fun validate(): CategoryFormState {
         val nameErrorMsg = when {
             name.isBlank() -> "Category name is required"
-            name.length < 2 -> "Category name must be at least 2 characters"
+            name.length < 2 -> "Name must be at least 2 characters"
             else -> null
         }
 
         val amountErrorMsg = when {
-            targetAmount.isBlank() -> "Target amount is required"
+            targetAmount.isBlank() -> "Budget amount is required"
             targetAmount.toDoubleOrNull() == null -> "Enter a valid amount"
-            targetAmount.toDoubleOrNull()!! < 0 -> "Amount must be positive"
+            targetAmount.toDoubleOrNull()!! < 0 -> "Amount must not be negative"
             else -> null
         }
 

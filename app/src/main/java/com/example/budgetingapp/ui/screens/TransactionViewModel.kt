@@ -66,131 +66,57 @@ class TransactionViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(formState = updatedForm)
     }
 
-    fun createTransaction() {
-        val formState = _uiState.value.formState.validate()
-        _uiState.value = _uiState.value.copy(formState = formState)
-
-        if (!formState.isValid) {
-            return
-        }
-
-        val categoryId = _uiState.value.categoryId
-        if (categoryId.isEmpty()) {
-            _uiState.value = _uiState.value.copy(
-                errorMessage = "Category not selected"
-            )
-            return
-        }
-
+    private fun saveTransaction() {
         viewModelScope.launch {
-            try {
-                _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
+            val formState = _uiState.value.formState.validate()
+            if (!formState.isValid) {
+                _uiState.value = _uiState.value.copy(formState = formState)
+                return@launch
+            }
 
-                val transaction = Transaction(
-                    categoryId = categoryId,
-                    amount = formState.amount.toDouble(),
-                    description = formState.description.trim(),
-                    date = formState.date
+            _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
+
+            val result = if (_uiState.value.editingTransactionId != null) {
+                repository.updateTransaction(
+                    Transaction(
+                        id = _uiState.value.editingTransactionId!!,
+                        categoryId = _uiState.value.categoryId,
+                        amount = formState.amount.toDouble(),
+                        description = formState.description.trim(),
+                        date = formState.date
+                    )
                 )
-
-                val result = repository.createTransaction(transaction)
-
-                if (result.isSuccess) {
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        transactionCreated = true,
-                        formState = TransactionFormState() // Reset form
+            } else {
+                repository.createTransaction(
+                    Transaction(
+                        categoryId = _uiState.value.categoryId,
+                        amount = formState.amount.toDouble(),
+                        description = formState.description.trim(),
+                        date = formState.date
                     )
-                } else {
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        errorMessage = "Failed to create transaction: ${result.exceptionOrNull()?.message}"
-                    )
-                }
+                )
+            }
 
-            } catch (e: Exception) {
+            if (result.isSuccess) {
+                _uiState.value = _uiState.value.copy(isLoading = false, transactionCreated = true)
+            } else {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    errorMessage = "Failed to create transaction: ${e.message}"
+                    errorMessage = result.exceptionOrNull()?.message ?: "An error occurred"
                 )
             }
         }
     }
 
-    fun updateTransaction() {
-        val formState = _uiState.value.formState.validate()
-        _uiState.value = _uiState.value.copy(formState = formState)
-
-        if (!formState.isValid) {
-            return
-        }
-
-        val transactionId = _uiState.value.editingTransactionId
-        val categoryId = _uiState.value.categoryId
-
-        if (transactionId == null || categoryId.isEmpty()) {
-            _uiState.value = _uiState.value.copy(
-                errorMessage = "Transaction ID or Category not found"
-            )
-            return
-        }
-
-        viewModelScope.launch {
-            try {
-                _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
-
-                val updatedTransaction = Transaction(
-                    id = transactionId,
-                    categoryId = categoryId,
-                    amount = formState.amount.toDouble(),
-                    description = formState.description.trim(),
-                    date = formState.date
-                )
-
-                val result = repository.updateTransaction(updatedTransaction)
-
-                if (result.isSuccess) {
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        transactionCreated = true // Reuse the same flag for success
-                    )
-                } else {
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        errorMessage = "Failed to update transaction: ${result.exceptionOrNull()?.message}"
-                    )
-                }
-
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    errorMessage = "Failed to update transaction: ${e.message}"
-                )
-            }
-        }
-    }
-
-    fun clearError() {
-        _uiState.value = _uiState.value.copy(errorMessage = null)
+    fun submitTransaction() {
+        saveTransaction()
     }
 
     fun resetForm() {
-        _uiState.value = _uiState.value.copy(
-            formState = TransactionFormState(),
-            editingTransactionId = null,
-            transactionCreated = false,
-            errorMessage = null
-        )
+        _uiState.value = TransactionUiState()
     }
 
     fun markTransactionCreatedHandled() {
         _uiState.value = _uiState.value.copy(transactionCreated = false)
     }
-
-    // Get transactions for a category (for future transaction history view)
-    suspend fun getTransactionsForCategory(categoryId: String) =
-        repository.getTransactionsForCategory(categoryId)
-
-    suspend fun getTransactionSummary(categoryId: String) =
-        repository.getTransactionSummaryForCategory(categoryId)
 }
