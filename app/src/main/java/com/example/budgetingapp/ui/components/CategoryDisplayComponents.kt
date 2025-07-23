@@ -26,22 +26,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.budgetingapp.data.model.Category
 
 @Composable
 fun CategoryCard(
     category: Category,
+    modifier: Modifier = Modifier,
+    elevation: Dp = 2.dp, // Add elevation parameter
     onViewTransactions: () -> Unit,
     onQuickAddTransaction: () -> Unit,
-    // New parameters to control the card's behavior on the history screen
     isOnHistoryScreen: Boolean = false,
     onEditCategory: () -> Unit = {},
     onDeleteCategory: () -> Unit = {}
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        modifier = modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = elevation) // Use the elevation parameter
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             // Header: Category Name and Type
@@ -88,7 +90,6 @@ fun CategoryCard(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // ** THE FIX IS HERE **
             // Action Buttons now change based on the context
             CategoryActionButtons(
                 isOnHistoryScreen = isOnHistoryScreen,

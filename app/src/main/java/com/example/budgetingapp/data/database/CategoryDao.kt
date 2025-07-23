@@ -12,18 +12,16 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface CategoryDao {
 
-    @Query("SELECT * FROM categories WHERE isActive = 1")
+    @Query("SELECT * FROM categories WHERE isActive = 1 ORDER BY displayOrder ASC")
     fun getAllActiveCategories(): Flow<List<Category>>
 
-    @Query("SELECT * FROM categories WHERE monthId = :monthId AND isActive = 1")
+    @Query("SELECT * FROM categories WHERE monthId = :monthId AND isActive = 1 ORDER BY displayOrder ASC")
     fun getCategoriesForMonth(monthId: String): Flow<List<Category>>
 
-    // ** THE FIX IS HERE **
-    // New non-flow version for one-time fetches like in the rollover logic.
-    @Query("SELECT * FROM categories WHERE monthId = :monthId AND isActive = 1")
+    @Query("SELECT * FROM categories WHERE monthId = :monthId AND isActive = 1 ORDER BY displayOrder ASC")
     suspend fun getCategoriesForMonthOnce(monthId: String): List<Category>
 
-    @Query("SELECT * FROM categories WHERE monthId = :monthId AND type = :type AND isActive = 1")
+    @Query("SELECT * FROM categories WHERE monthId = :monthId AND type = :type AND isActive = 1 ORDER BY displayOrder ASC")
     suspend fun getCategoriesByMonthAndType(monthId: String, type: CategoryType): List<Category>
 
     @Query("SELECT * FROM categories WHERE id = :id AND isActive = 1 LIMIT 1")

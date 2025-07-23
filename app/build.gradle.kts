@@ -77,9 +77,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.activity:activity-compose:1.8.2")
 
-    // REMOVED: Explicit Kotlin Standard Library (this was causing conflicts)
-    // The Kotlin standard library is included automatically by the Kotlin plugin
-
     // Compose BOM
     implementation(platform("androidx.compose:compose-bom:2024.02.00"))
     implementation("androidx.compose.ui:ui")

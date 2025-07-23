@@ -25,7 +25,8 @@ data class Category(
     val description: String = "",
     // New fields for rollover functionality
     val isRolloverEnabled: Boolean = false, // Does this category carry a balance?
-    val rolloverBalance: Double = 0.0 // The balance carried over from the previous month
+    val rolloverBalance: Double = 0.0, // The balance carried over from the previous month
+    val displayOrder: Int = 0 // New field for display order
 ) {
     // Total funds available for this category in the current month
     val totalBudgeted: Double

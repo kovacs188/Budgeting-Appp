@@ -129,7 +129,12 @@ class BudgetRepository @Inject constructor(
     suspend fun createCategory(category: Category): Result<Unit> {
         return try {
             val currentMonth = _currentMonthFlow.value ?: return Result.failure(Exception("No active month found"))
-            val categoryWithMonthId = category.copy(monthId = currentMonth.id)
+            // Get the highest current displayOrder and add 1
+            val maxOrder = categoryDao.getCategoriesForMonthOnce(currentMonth.id).maxOfOrNull { it.displayOrder } ?: -1
+            val categoryWithMonthId = category.copy(
+                monthId = currentMonth.id,
+                displayOrder = maxOrder + 1
+            )
             categoryDao.insertCategory(categoryWithMonthId)
 
             if (categoryWithMonthId.type == CategoryType.FIXED_EXPENSE && categoryWithMonthId.targetAmount > 0) {
@@ -188,6 +193,13 @@ class BudgetRepository @Inject constructor(
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    suspend fun updateCategoryOrder(categories: List<Category>) {
+        // Room runs suspend DAO functions in a transaction, so this loop is safe.
+        categories.forEachIndexed { index, category ->
+            categoryDao.updateCategory(category.copy(displayOrder = index))
         }
     }
 
